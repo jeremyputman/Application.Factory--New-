@@ -1,0 +1,10 @@
+Logs/
+Workspace/
+Temp/
+Output/
+WorkingFolder/
+Templates/PSADT/ServiceUI*
+Module/
+Build/Source/Private/
+Build/Source/Public/
+Workspace/

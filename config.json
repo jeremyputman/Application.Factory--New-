@@ -1,0 +1,28 @@
+{
+  "api" : {
+    "url" : "### APP FACTORY URI ###",
+    "key" : "### API KEY ###"
+  },  
+  "keyvault_name" : "### KEYVAULT NAME ###",
+  "smtp_email_address" : "### SMTP EMAIL ADDRESS ###",
+  "storage" : {
+    "public" : "### PUBLIC CONTAINER NAME ###",
+    "installers" : "### STORAGE ACCOUNT HOLDING INSTALLERS ###",
+    "packages" : "### STORAGE ACCOUNT HOLDING PACKAGES ###"
+  },
+  "app_registration" : {
+    "client_id" : "### APPLICATION CLIENT ID ###",
+    "tenant_id" : "### APPLICATION TENANT ID ###",
+    "secret" : "### APPLICATION SECRET ###"
+  },
+  "sharepoint": {
+    "tenant": "### SHAREPOINT TENANT ###",
+    "clientId": "### SHAREPOINT CLIENT ID ###",
+    "sharepointsite": "### SHAREPOINT SITE ###",
+    "sharepointurl": "### SHAREPOINT URL ###",
+    "certificateFile": "### SHAREPOINT CERTIFICATE FILE ###",
+    "certificateSecret": "### SHAREPOINT CERTIFICATE SECRET ###",
+    "versionField": "### SHAREPOINT VERSION FIELD ###",
+    "documentLibrary": "### SHAREPOINT DOCUMENT LIBRARY ###"
+  }
+}

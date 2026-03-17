@@ -1,3 +1,6 @@
+# 0.1.4
+- Fix for Graph Access Token Error
+
 # 0.1.3 
 - Fix for some group logic
 - Fix for blank prefix

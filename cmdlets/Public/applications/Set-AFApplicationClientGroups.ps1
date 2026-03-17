@@ -7,7 +7,7 @@ function Set-AFApplicationClientGroups {
   $sections = @("assignment_available", "assignment_available_exceptions", "assignment_required", "assignment_required_exceptions", "assignment_uninstall", "assignment_uninstall_exceptions")
   $graph_header = @{
     "content-type"  = "application/json"
-    "Authorization" = "Bearer $($global:AccessToken.access_token)"
+    "Authorization" = "Bearer $($global:AccessToken.AccessToken)"
   }
   $filter_split = $configuration.filters -split "::"
   $filters = @{}

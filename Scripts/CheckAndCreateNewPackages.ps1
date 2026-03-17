@@ -6,5 +6,5 @@ $config_file_path = "C:\DevOps\Application.Factory\Workspace\AppFactoryConfig.js
 $workspace_path = "C:\DevOps\Application.Factory"
 #Update-Evergreen -Force *> $null
 
-$application = "Acrobat"
+$application = "Bridge 2026"
 Start-AFProcess -configFile $config_file_path -workspace $workspace_path -application $application -EnableLogging -TestMode

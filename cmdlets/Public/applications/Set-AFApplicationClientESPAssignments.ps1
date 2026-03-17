@@ -6,7 +6,7 @@ function Set-AFApplicationClientESPAssignments {
   )
   $graph_header = @{
     "content-type"  = "application/json"
-    "Authorization" = "Bearer $($global:AccessToken.access_token)"
+    "Authorization" = "Bearer $($global:AccessToken.AccessToken)"
   }  
   $assignments = $configuration.esp_assignments -split ","
   foreach ($assignment in $assignments) {

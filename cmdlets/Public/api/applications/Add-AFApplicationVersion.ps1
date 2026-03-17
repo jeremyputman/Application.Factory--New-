@@ -1,3 +1,17 @@
+<#
+.SYNOPSIS
+    Adds a version to an application in the Application Factory API.
+.DESCRIPTION
+    Calls the API to add a new version to the specified application.
+.PARAMETER id
+    The ID of the application.
+.PARAMETER versions
+    The version(s) to add.
+.OUTPUTS
+    API response object.
+.EXAMPLE
+    Add-AFApplicationVersion -id "AppId" -versions "1.2.3"
+#>
 function Add-AFApplicationVersion{
   [cmdletbinding()]
   param(

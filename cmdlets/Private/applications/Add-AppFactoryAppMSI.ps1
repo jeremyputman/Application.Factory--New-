@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+    Generates script lines to install or uninstall MSI applications.
+.DESCRIPTION
+    Builds PowerShell script lines for MSI installation or uninstallation, supporting various options and arguments.
+.OUTPUTS
+    System.Collections.Generic.List[String[]]
+.EXAMPLE
+    Add-AppFactoryAppMSI -AppSetupFileName 'setup.msi' -directory 'C:\Installers' -Action Install
+#>
 function Add-AppFactoryAppMSI{
   [cmdletbinding()]
   [OutputType([System.Collections.Generic.List[String[]]])]
@@ -18,6 +28,7 @@ function Add-AppFactoryAppMSI{
     [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
   )
   $ApplicationScriptLines = [System.Collections.Generic.List[String[]]]@()
+  # Determine the path and command for MSI installer
   if($PSBoundParameters.ContainsKey("AppSetupFileName") -and $AppSetupFileName){
     if($directory -ne ""){
       $executePath = "`"`$($($directory))\`$(`$AppSetupFileName)`""
@@ -41,6 +52,7 @@ function Add-AppFactoryAppMSI{
       $execute = "Start-ADTMsiProcess -Action `"$($Action)`" -productcode `"$($productcode)`""
     }
   }
+  # Add transforms and additional arguments if present
   if ($PSBoundParameters.ContainsKey("Transforms")  -and $Transforms) {
     $ApplicationScriptLines.Add("`t`$Transforms = `"$($Transforms)`"") | Out-Null
     $execute = "$($execute) -Transforms `"`$($($directory))\`$(`$Transforms)`""
@@ -59,5 +71,5 @@ function Add-AppFactoryAppMSI{
   if ($PSBoundParameters.ContainsKey("rebootExitCodes") -and $rebootExitCodes) {$execute = "$($execute) -rebootExitCodes $($rebootExitCodes -join ",")"}  
   if ($PSBoundParameters.ContainsKey("ignoreExitCodes") -and $ignoreExitCodes) {$execute = "$($execute) -ignoreExitCodes $($ignoreExitCodes -join ",")"}  
   $ApplicationScriptLines.Add("`t$($execute)") | Out-Null
-  return @(,$ApplicationScriptLines)  		    
+  return @(,$ApplicationScriptLines)  
 }

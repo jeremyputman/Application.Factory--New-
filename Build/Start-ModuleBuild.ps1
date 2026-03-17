@@ -1,5 +1,5 @@
 param(
-  [version]$global:Version = "0.1.0"
+  [version]$global:Version = "0.1.2"
 )
 #Requires -Module ModuleBuilder
 $privateFolder = Join-Path -Path $PSScriptRoot -ChildPath Source  -AdditionalChildPath "Private"
@@ -43,7 +43,7 @@ foreach($folder in $foldersToCopy){
   $folderPath = Join-Path -Path $parentFolder -ChildPath $folder
   Copy-Item -Path $folderPath -Destination "$($moduleDir)\Application.Factory" -Recurse -Force
 }
-$updatePath = "C:\Program Files\PowerShell\Modules\Application.Factory\$($Version)\"
-if(Test-Path $updatePath){
-  Copy-Item -Path "C:\DevOps\Application.Factory\Module\Application.Factory\*" -Destination $updatePath -Force -Recurse
-}
+# $updatePath = "C:\Program Files\PowerShell\Modules\Application.Factory\$($Version)\"
+# if(Test-Path $updatePath){
+#   Copy-Item -Path "C:\DevOps\Application.Factory\Module\Application.Factory\*" -Destination $updatePath -Force -Recurse
+# }

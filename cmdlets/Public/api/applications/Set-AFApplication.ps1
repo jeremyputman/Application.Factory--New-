@@ -1,3 +1,159 @@
+<#
+.SYNOPSIS
+    Updates an application via API.
+.DESCRIPTION
+    Sends a PATCH request to the API to update an application with the provided parameters.
+.PARAMETER id
+    The unique identifier for the application. (Mandatory)
+.PARAMETER name
+    The display name of the application.
+.PARAMETER description
+    The description of the application.
+.PARAMETER publisher
+    The publisher of the application.
+.PARAMETER notes
+    Notes for the application.
+.PARAMETER owner
+    Owner of the application.
+.PARAMETER information_url
+    Information URL for the application.
+.PARAMETER privacy_url
+    Privacy URL for the application.
+.PARAMETER appsource
+    Source type for the application (azure_storage, winget, evergreen, sharepoint, psadt, ecno, local_storage).
+.PARAMETER appid
+    Application ID.
+.PARAMETER appsetupfilename
+    Setup file name for the application.
+.PARAMETER storageaccountcontainername
+    Storage account container name.
+.PARAMETER filter_architecture
+    Filter for architecture.
+.PARAMETER filter_platform
+    Filter for platform.
+.PARAMETER filter_channel
+    Filter for channel.
+.PARAMETER filter_type
+    Filter for type.
+.PARAMETER filter_installer_type
+    Filter for installer type.
+.PARAMETER filter_release
+    Filter for release.
+.PARAMETER filter_language
+    Filter for language.
+.PARAMETER filter_imagetype
+    Filter for image type.
+.PARAMETER dependson
+    Dependencies for the application.
+.PARAMETER active
+    Boolean to indicate if the application is active.
+.PARAMETER lastupdate
+    Last update date/time.
+.PARAMETER pauseupdate
+    Boolean to pause updates.
+.PARAMETER publishto
+    Array of publish targets.
+.PARAMETER versions
+    Array of application versions.
+.PARAMETER install_type
+    Type of installation (none, script, powershell, ecno, exe, msi).
+.PARAMETER install_argumentList
+    Arguments for installation.
+.PARAMETER install_additionalArgumentList
+    Additional arguments for installation.
+.PARAMETER install_secureArgumentList
+    Boolean for secure installation arguments.
+.PARAMETER install_installer
+    Installer for installation.
+.PARAMETER install_transforms
+    Transforms for installation.
+.PARAMETER install_SkipMSIAlreadyInstalledCheck
+    Boolean to skip MSI already installed check.
+.PARAMETER install_script
+    Script for installation.
+.PARAMETER install_wim
+    Boolean for WIM installation.
+.PARAMETER install_successExitCodes
+    Success exit codes for installation.
+.PARAMETER install_rebootExitCodes
+    Reboot exit codes for installation.
+.PARAMETER install_ignoreExitCodes
+    Ignore exit codes for installation.
+.PARAMETER install_conflictingProcessStart
+    Processes that conflict at start of installation.
+.PARAMETER install_conflictingProcessEnd
+    Processes that conflict at end of installation.
+.PARAMETER uninstall_type
+    Type of uninstallation (none, msi, exe, name, guid, ecno, script, powershell).
+.PARAMETER uninstall_name
+    Name for uninstallation.
+.PARAMETER uninstall_namematch
+    Name match for uninstallation.
+.PARAMETER uninstall_productcode
+    Product code for uninstallation.
+.PARAMETER uninstall_filterscript
+    Filter script for uninstallation.
+.PARAMETER uninstall_argumentlist
+    Arguments for uninstallation.
+.PARAMETER uninstall_additionalargumentlist
+    Additional arguments for uninstallation.
+.PARAMETER uninstall_secureargumentlist
+    Boolean for secure uninstallation arguments.
+.PARAMETER uninstall_script
+    Script for uninstallation.
+.PARAMETER uninstall_installer
+    Installer for uninstallation.
+.PARAMETER uninstall_wim
+    Boolean for WIM uninstallation.
+.PARAMETER uninstall_dirfiles
+    Boolean for uninstalling directory files.
+.PARAMETER uninstall_ignoreexitcodes
+    Ignore exit codes for uninstallation.
+.PARAMETER uninstall_conflictingprocessstart
+    Processes that conflict at start of uninstallation.
+.PARAMETER uninstall_conflictingprocessend
+    Processes that conflict at end of uninstallation.
+.PARAMETER installeexperience
+    Installation experience (user, system).
+.PARAMETER devicerestartbehavior
+    Device restart behavior (suppress, force, basedOnReturnCode, allow).
+.PARAMETER allowavailableuninstall
+    Boolean to allow available uninstall.
+.PARAMETER minimumsupportedwindowsrelease
+    Minimum supported Windows release.
+.PARAMETER architecture
+    Architecture for the application (x86, x64, all, arm64).
+.PARAMETER minimumfreediskspaceinmb
+    Minimum free disk space in MB.
+.PARAMETER minimummemoryinmb
+    Minimum memory in MB.
+.PARAMETER detection_type
+    Type of detection (msi, registry_version, registry_existence, script).
+.PARAMETER detection_scriptfile
+    Script file for detection.
+.PARAMETER detection_enforcesignaturecheck
+    Boolean to enforce signature check for detection.
+.PARAMETER detection_runas32bit
+    Boolean to run detection as 32-bit.
+.PARAMETER detection_detectionmethod
+    Detection method (existence, versionComparison).
+.PARAMETER detection_keypath
+    Key path for detection.
+.PARAMETER detection_valuename
+    Value name for detection.
+.PARAMETER detection_operator
+    Operator for detection (notConfigured, equals, notEquals, greaterThanOrEqual, greaterThan, lessThanOrEqual, lessThan).
+.PARAMETER detection_productversionoperator
+    Product version operator for detection (notConfigured, equals, notEquals, greaterThanOrEqual, greaterThan, lessThanOrEqual, lessThan).
+.PARAMETER detection_value
+    Value for detection.
+.PARAMETER detection_check32biton64system
+    Boolean to check 32-bit on 64-bit system for detection.
+.OUTPUTS
+    The response from the API call.
+.EXAMPLE
+    Set-AFApplication -id '12345' -name 'App1' -publisher 'Publisher1' -install_type 'msi' -install_argumentList '/quiet'
+#>
 function Set-AFApplication {
   [cmdletbinding()]
   param(
@@ -75,6 +231,7 @@ function Set-AFApplication {
     [Parameter()][string]$detection_value,
     [Parameter()][bool]$detection_check32biton64system
   )
+  # Check for required API header
   if (-not $script:api_header) {
     Write-Error "API header not set. Please use Set-AFSettings to set the API key."
     return
@@ -92,7 +249,7 @@ function Set-AFApplication {
     requirementrule = @('minimumsupportedwindowsrelease', 'architecture', 'minimumfreediskspaceinmb', 'minimummemoryinmb')
     detectionrule   = @('detection_type', 'detection_scriptfile', 'detection_enforcesignaturecheck', 'detection_runas32bit', 'detection_detectionmethod', 'detection_keypath', 'detection_valuename', 'detection_operator', 'detection_productversionoperator', 'detection_value', 'detection_check32biton64system')
   }
-
+  # Build request body from parameters
   $body = @{}
   foreach ($section in $sections.Keys) {
     foreach ($param in $sections[$section]) {

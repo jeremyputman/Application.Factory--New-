@@ -1,33 +1,51 @@
+<#
+.SYNOPSIS
+    Retrieves published application versions from storage containers.
+.DESCRIPTION
+    Queries public and client-specific storage containers for Intune application packages, parses their names, and stores published version information in a script-scoped variable.
+.PARAMETER LogLevel
+    The logging level for output messages. Defaults to 'Verbose'.
+.OUTPUTS
+    None. Populates $script:application_packages with published version data.
+.EXAMPLE
+    Get-AFApplicationPublishedVersions
+#>
 function Get-AFApplicationPublishedVersions {
   [cmdletbinding()]
   param(
     [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
   )
+  # Return if published versions are already loaded
   if ($script:application_packages) {
     return
   }
+  # Initialize published versions dictionary
   $script:application_packages = @{}
-  $storage_credential = Get-Secret -Vault $configuration.keyvault_name -Name $configuration.storage.packages -AsPlainText
-  $storageAccountContext = New-AzStorageContext -StorageAccountName $configuration.storage.packages -StorageAccountKey $storage_credential
-  # Get Public Container Blobs
+  # Get storage credentials and context
+  $storage_credential = Get-Secret -Vault $script:keyvault_name -Name $script:storage_packages -AsPlainText
+  $storageAccountContext = New-AzStorageContext -StorageAccountName $script:storage_packages -StorageAccountKey $storage_credential
+  # Get public container blobs for Intune packages
   $intune_win_files = (Get-AzStorageBlob -Container public -Context $storageAccountContext | Select-Object -Property Name | Where-Object { $_ -match "intunewin" }).Name
-  if ($configuration.application_key -eq "guid") {
+  # Determine regex for app/version extraction
+  if ($script:application_key -eq "guid") {
     $regex_match = '^(?<app>[0-9a-fA-F-]{36})/(?<Version>[^/]+)/'
-  } 
+  }
   else{
     $regex_match = '^(?![0-9a-fA-F-]{36}/)(?<app>[^/]+)/(?<Version>[^/]+)/'
   }
+  # Parse public container files for app/version
   $script:application_packages.public = $intune_win_files | ForEach-Object {
     if ($_ -match $regex_match) {
       [PSCustomObject]@{
         app    = $matches.app
         Version = $matches.Version
       }
-    }  
+    }
   }
+  # Get client list and parse client-specific containers
   $client_list = Get-AFClient
   foreach($client in $client_list) {
-    if ($configuration.client_key -eq "guid") {
+    if ($script:client_key -eq "guid") {
       $client_id = $client.id
     }
     else{
@@ -40,7 +58,7 @@ function Get-AFApplicationPublishedVersions {
           app    = $matches.app
           Version = $matches.Version
         }
-      }  
-    }    
-  }  
+      }
+    }
+  }
 }

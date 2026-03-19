@@ -22,8 +22,7 @@ function Add-AppFactoryApplicationBlockingProcess{
   param(
     [Parameter()][switch]$interactive,   
     [Parameter()][ValidateNotNullOrEmpty()][string[]]$blockingProcess,
-    [Parameter()][ValidateNotNullOrEmpty()][int]$deferCount = 0,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter()][ValidateNotNullOrEmpty()][int]$deferCount = 0
   )
   # List to hold generated script lines
   $ApplicationScriptLines = [System.Collections.Generic.List[String[]]]@()

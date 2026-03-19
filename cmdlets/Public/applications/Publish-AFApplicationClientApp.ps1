@@ -1,8 +1,7 @@
 function Publish-AFApplicationClientApp {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration
   )
   # Construct table for supported operating systems
     $ArchitectureTable = @{
@@ -38,7 +37,7 @@ function Publish-AFApplicationClientApp {
     "MinimumFreeDiskSpaceInMB"       = $script:application_data.requirementrule.minimumfreediskspaceinmb
   }
   # Build Detection Rules
-  $detection_rule = New-AFApplicationClientDetection -application $application -ApplicationFolder $download_folder -LogLevel $LogLevel
+  $detection_rule = New-AFApplicationClientDetection -application $application -ApplicationFolder $download_folder
   # Create the base 64 image file
   $Icon = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes("$(Join-Path -Path $download_folder -ChildPath "Icon.png")"))
   $IntuneAppPackage = Get-item -Path $(Join-Path -Path $download_folder -ChildPath "$($application.Name).intunewin")

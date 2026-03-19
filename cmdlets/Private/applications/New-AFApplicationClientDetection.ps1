@@ -3,8 +3,7 @@ function New-AFApplicationClientDetection {
   [OutputType([System.Collections.Generic.List[PSCustomObject]])]
   param(  
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$ApplicationFolder,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$ApplicationFolder
   )
   $rules = [System.Collections.Generic.List[PSCustomObject]]@() 
   $DetectionRules = $script:application_data.DetectionRule

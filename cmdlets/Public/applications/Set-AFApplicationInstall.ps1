@@ -15,8 +15,7 @@
 function Set-AFApplicationInstall {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter(Mandatory = $true)][PSCustomObject]$Application      
   )
   # Exit if install type is None
   if ($application.install.Type -eq "None") {
@@ -30,7 +29,7 @@ function Set-AFApplicationInstall {
   if ($application.install.wim -and $application.install.type -in @("exe","msi","script")) {
     $mountPath = Join-Path -Path "$($ENV:ALLUSERSPROFILE)" -ChildPath "AFS" -AdditionalChildPath $application.slug
     $installerPath = "`$mountPath"
-    foreach ($line in $((Add-AppFactoryAppWIM -section "start" -MountPath $mountPath -LogLevel $LogLevel).SyncRoot)) {
+    foreach ($line in $((Add-AppFactoryAppWIM -section "start" -MountPath $mountPath).SyncRoot)) {
       $installScript.Add($line)
     }
   }
@@ -50,7 +49,6 @@ function Set-AFApplicationInstall {
     SuccessExitCodes   = $application.install.SuccessExitCodes.name
     rebootExitCodes    = $application.install.rebootExitCodes.name
     ignoreExitCodes    = $application.install.ignoreExitCodes.name
-    LogLevel           = $LogLevel
   }
   if($application.Program.InstallExperience -eq "User"){
     $params.add("userInstall",$true)
@@ -89,7 +87,7 @@ function Set-AFApplicationInstall {
   }
   # Add WIM unmount script if needed
   if ($application.install.wim -and $application.install.type -in @("exe","msi","script")) {
-    foreach ($line in $(Add-AppFactoryAppWIM -section "end" -MountPath $mountPath -LogLevel $LogLevel).SyncRoot) {
+    foreach ($line in $(Add-AppFactoryAppWIM -section "end" -MountPath $mountPath).SyncRoot) {
       $installScript.Add($line)
     }
   }
@@ -98,9 +96,8 @@ function Set-AFApplicationInstall {
     $params = @{
       interactive     = $false
       blockingProcess = $application.install.conflictingProcessEnd.name
-      LogLevel        = $LogLevel
     }
-    foreach ($line in $((Add-AppFactoryApplicationBlockingProcess @params -LogLevel $LogLevel).SyncRoot)) {
+    foreach ($line in $((Add-AppFactoryApplicationBlockingProcess @params).SyncRoot)) {
       $installScript.Add($line)
     }
   }

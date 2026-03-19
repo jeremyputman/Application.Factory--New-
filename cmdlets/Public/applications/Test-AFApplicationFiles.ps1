@@ -15,8 +15,7 @@
 function Test-AFApplicationFiles {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter(Mandatory = $true)][PSCustomObject]$Application
   )
   # Validate that iconUrl property exists
   if(-not $application.iconUrl){

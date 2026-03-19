@@ -1,8 +1,7 @@
 function Get-AFApplicationClientFiles{
   [CmdletBinding()]
   param(  
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"  
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration
   )
   $download_folder = Join-Path -Path $script:working_folder -ChildPath "Download" -AdditionalChildPath $configuration.application.slug
   if(Test-Path $download_folder){
@@ -41,11 +40,11 @@ function Get-AFApplicationClientFiles{
         throw $_
       }      
       if ($script:enable_logging) {
-        Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] Downloaded file '$file'" -Level $LogLevel -Tag "Application", "$($configuration.application.Name)" -Target "Application Factory Client"
+        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] Downloaded file '$file'" -Tag "Application", "$($configuration.application.Name)"
       }      
     }
     catch{
-      Write-PSFMessage -Level Warning -Message "[<c='green'>$($configuration.application.Name)</c>] :: Failed to download file '$file' at url '$blob_url' for application '$($configuration.application.Name)' with error message: $($_.Exception.Message)"
+      Write-AFLogEntry -Level Warning -Message "[<c='green'>$($configuration.application.Name)</c>] :: Failed to download file '$file' at url '$blob_url' for application '$($configuration.application.Name)' with error message: $($_.Exception.Message)"
       continue
     }
   }

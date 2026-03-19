@@ -13,8 +13,7 @@ function Get-AppFactorySharepointFile{
   param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$version,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination 
   )
   # Prepare SharePoint connection configuration
   $pfxPath = Join-Path -Path $script:Workspace -ChildPath $script:sharepoint_certificateFile

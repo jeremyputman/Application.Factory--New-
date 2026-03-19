@@ -19,8 +19,7 @@ function Publish-AFApplication {
   param(
     [Parameter(Mandatory = $true)][PSCustomObject]$Application,
     [Parameter(Mandatory = $true)][PSCustomObject]$CurrentVersion,
-    [Parameter()][switch]$TestMode,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter()][switch]$TestMode     
   )  
   # Determine storage containers for upload
   $containerUploads = [System.Collections.Generic.List[PSCustomObject]]@()
@@ -116,13 +115,13 @@ function Publish-AFApplication {
   # Upload files to each container
   foreach ($container in $containerUploads) {
     if ($script:enable_logging) {
-      Write-PSFMessage -Message "[<c='green'>$($application.Information.Name)</c>] Uploading files to storage" -Level $LogLevel -Tag "Application", "$($application.Information.Name)" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.Information.Name)</c>] Uploading files to storage" -Tag "Application", "$($application.Information.Name)"
     }
     foreach ($upload in $appUploads) {
       try {
         Set-AzStorageBlobContent @upload -Container $container -Context $storageAccountContext -Force -ErrorAction Stop | Out-Null
         if ($script:enable_logging) {
-          Write-PSFMessage -Message "[<c='green'>$($application.Information.Name)</c>] Uploaded <c='green'>$($upload.File)</c> to <c='green'>$($container)</c> container" -Level $LogLevel -Tag "Application", "$($application.Information.Name)" -Target "Application Factory Service"
+          Write-AFLogEntry -Message "[<c='green'>$($application.Information.Name)</c>] Uploaded <c='green'>$($upload.File)</c> to <c='green'>$($container)</c> container" -Tag "Application", "$($application.Information.Name)"
         }
       }
       catch {

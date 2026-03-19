@@ -15,8 +15,7 @@
 function Set-AFApplicationUninstall {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter(Mandatory = $true)][PSCustomObject]$Application    
   )  
   # Exit if uninstall type is None
   if ($application.Uninstall.Type -eq "None") {
@@ -35,7 +34,7 @@ function Set-AFApplicationUninstall {
   if ($application.Uninstall.wim -and $application.Uninstall.type -in @("exe","msi","script")) {
     $mountPath = Join-Path -Path "$($ENV:ALLUSERSPROFILE)" -ChildPath "AFS" -AdditionalChildPath $application.slug
     $uninstallerPath = "`$mountPath"
-    foreach ($line in $((Add-AppFactoryAppWIM -section "start" -MountPath $mountPath -LogLevel $LogLevel).SyncRoot)) {
+    foreach ($line in $((Add-AppFactoryAppWIM -section "start" -MountPath $mountPath).SyncRoot)) {
       $uninstallScript.Add($line)
     }  
   }
@@ -55,7 +54,6 @@ function Set-AFApplicationUninstall {
     SuccessExitCodes   = $application.Uninstall.SuccessExitCodes.name
     rebootExitCodes    = $application.Uninstall.rebootExitCodes.name
     ignoreExitCodes    = $application.Uninstall.ignoreExitCodes.name
-    LogLevel           = $LogLevel
   }
   # Generate uninstall script based on uninstaller type
   switch ($application.Uninstall.type) {
@@ -98,7 +96,7 @@ function Set-AFApplicationUninstall {
   }
   # Add WIM unmount script if needed
   if ($application.Uninstall.wim -and $application.Uninstall.type -in @("exe","msi","script")) {
-    foreach ($line in $(Add-AppFactoryAppWIM -section "end" -MountPath $mountPath -LogLevel $LogLevel).SyncRoot) {
+    foreach ($line in $(Add-AppFactoryAppWIM -section "end" -MountPath $mountPath).SyncRoot) {
       $uninstallScript.Add($line)
     } 
   }
@@ -107,9 +105,8 @@ function Set-AFApplicationUninstall {
     $params = @{
       interactive     = $false
       blockingProcess = $application.Uninstall.conflictingProcessEnd.name
-      LogLevel        = $LogLevel
     }
-    foreach ($line in $((Add-AppFactoryApplicationBlockingProcess @params -LogLevel $LogLevel).SyncRoot)) {
+    foreach ($line in $((Add-AppFactoryApplicationBlockingProcess @params).SyncRoot)) {
       $uninstallScript.Add($line)
     }
   }

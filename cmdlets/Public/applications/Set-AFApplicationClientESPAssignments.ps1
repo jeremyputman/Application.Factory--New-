@@ -1,8 +1,7 @@
 function Set-AFApplicationClientESPAssignments {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$configuration,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter(Mandatory = $true)][PSCustomObject]$configuration    
   )
   $graph_header = @{
     "content-type"  = "application/json"

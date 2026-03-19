@@ -13,7 +13,6 @@
 function Get-AFApplicationPublishedVersions {
   [cmdletbinding()]
   param(
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
   )
   # Return if published versions are already loaded
   if ($script:application_packages) {

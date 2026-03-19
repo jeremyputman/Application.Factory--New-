@@ -15,8 +15,7 @@
 function New-AFIntuneFile {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter(Mandatory = $true)][PSCustomObject]$Application  
   )  
   # Prepare paths for publish folder and IntuneWinAppUtil
   $AppPublishFolderPath = Join-Path -Path $script:working_folder -ChildPath "Publish" -AdditionalChildPath $application.slug

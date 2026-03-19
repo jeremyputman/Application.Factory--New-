@@ -1,5 +1,5 @@
 param(
-  [version]$global:Version = "0.1.4"
+  [version]$global:Version = "0.1.6"
 )
 #Requires -Module ModuleBuilder
 $privateFolder = Join-Path -Path $PSScriptRoot -ChildPath Source  -AdditionalChildPath "Private"

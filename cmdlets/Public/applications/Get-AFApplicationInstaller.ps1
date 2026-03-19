@@ -18,8 +18,7 @@ function Get-AFApplicationInstaller{
   [cmdletbinding()]
   param(
     [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter(Mandatory = $true)][PSCustomObject]$CurrentVersion,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"    
+    [Parameter(Mandatory = $true)][PSCustomObject]$CurrentVersion   
   )
   # Ensure setup folder exists for the application
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $application.slug
@@ -35,13 +34,12 @@ function Get-AFApplicationInstaller{
   $OutFilePath = Join-Path -Path $AppSetupFolderPath -ChildPath $application.SourceFiles.AppSetupFileName
   # Log download action if logging is enabled
   if($script:enable_logging){
-    Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Downloading setupfile <c='green'>$($CurrentVersion.URI)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+    Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Downloading setupfile <c='green'>$($CurrentVersion.URI)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
   }
   # Prepare parameters for file retrieval
   $params = @{
     "Application" = $Application
     "version" = $CurrentVersion
-    "LogLevel" = $LogLevel
     "destination" = $AppSetupFolderPath
   }
   # Download installer based on source type

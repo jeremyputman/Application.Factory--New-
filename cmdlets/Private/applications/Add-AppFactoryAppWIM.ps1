@@ -13,8 +13,7 @@ function Add-AppFactoryAppWIM{
   [OutputType([System.Collections.Generic.List[String[]]])]
   param(
     [Parameter(Mandatory = $true)][ValidateSet("start","end")][string]$section,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$MountPath,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$MountPath
   ) 
   $ApplicationScriptLines = [System.Collections.Generic.List[String[]]]@() 
   # Add script lines for mounting or dismounting WIM files

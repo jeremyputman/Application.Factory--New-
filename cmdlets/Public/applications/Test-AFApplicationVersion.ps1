@@ -18,14 +18,12 @@ function Test-AFApplicationVersion {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter()][switch]$force,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter()][switch]$force
   )
   # Retrieve published versions and determine current version from source
-  Get-AFApplicationPublishedVersions -LogLevel $LogLevel
+  Get-AFApplicationPublishedVersions
   $params = @{
     "Application" = $Application
-    "LogLevel" = $LogLevel
   }
   switch ($Application.SourceFiles.AppSource) {
     'azure_storage' {

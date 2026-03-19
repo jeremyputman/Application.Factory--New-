@@ -2,7 +2,8 @@ function Set-AFClientSettings{
   param(
     [Parameter(Mandatory = $true)][string]$configFile,
     [Parameter(Mandatory = $false)][string]$Workspace = $PSScriptRoot,
-    [Parameter()][switch]$EnableLogging
+    [Parameter()][switch]$EnableLogging,
+    [Parameter()][string]$LogLevel
   )
   # Enable logging if requested
   if($EnableLogging.IsPresent){
@@ -32,6 +33,7 @@ function Set-AFClientSettings{
   $script:api_uri = $configuration.api.url
   $script:client_id = $configuration.api.client
   $script:enable_logging = $EnableLogging
+  $script:log_level = $LogLevel
   $script:Workspace = Join-Path -Path $Workspace -ChildPath "Workspace"
   $script:keyvault_name = $configuration.keyvault_name
   $script:client_key = $process_tokens.client_key

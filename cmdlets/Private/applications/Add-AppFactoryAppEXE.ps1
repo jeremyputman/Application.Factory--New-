@@ -19,8 +19,7 @@ function Add-AppFactoryAppEXE{
     [Parameter()][int[]]$SuccessExitCodes,
     [Parameter()][int[]]$rebootExitCodes,
     [Parameter()][int[]]$ignoreExitCodes,
-    [Parameter()][switch]$userInstall,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter()][switch]$userInstall
   )
   $ApplicationScriptLines = [System.Collections.Generic.List[String[]]]@()
   # Determine the path to the EXE installer

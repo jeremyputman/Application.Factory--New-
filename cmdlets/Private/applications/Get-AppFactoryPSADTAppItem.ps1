@@ -12,8 +12,7 @@ function Get-AppFactoryPSADTAppItem {
   [CmdletBinding()]
   [OutputType([PSCustomObject])]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output","Verbose")][string]$LogLevel = "Verbose"    
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application
   )
   # Determine the latest version for the PSADT application
   if($application.sourcefiles.versions.count -eq 0){

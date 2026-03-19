@@ -11,8 +11,7 @@
 function Get-AppFactoryAzureStorageAppItem {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application
   )
   try {
     # Get credentials and create storage context
@@ -31,7 +30,7 @@ function Get-AppFactoryAzureStorageAppItem {
   }
   catch {
     # Log error and rethrow
-    Write-PSFMessage -Message "[<c='green'>$($application.Information.DisplayName)</c>] Error Occured: $($_)" -Level "Error" -Tag "Application", "$($application.Information.DisplayName)" -Target "Application Factory Service"
+    Write-AFLogEntry -Message "[<c='green'>$($application.Information.DisplayName)</c>] Error Occured: $($_)" -Level "Error" -Tag "Application", "$($application.Information.DisplayName)"
     throw $_
   }  
 }

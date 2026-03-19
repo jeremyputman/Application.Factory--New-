@@ -1,3 +1,9 @@
+# 0.1.6
+- Modified logging functions
+
+# 0.1.5
+- Clear the script variable for Package List
+
 # 0.1.4
 - Fix for Graph Access Token Error
 

@@ -5,6 +5,7 @@ function Start-AFClientProcess {
     [Parameter(Mandatory = $true)][string]$workspace,
     [Parameter()][string]$application_name,
     [Parameter()][switch]$EnableLogging,
+    [Parameter()][string]$LogLevel = "Verbose",
     [Parameter()][switch]$Force,
     [Parameter()][switch]$DownloadOnly
   )
@@ -12,8 +13,10 @@ function Start-AFClientProcess {
   $params = @{
     configFile    = $configFile
     EnableLogging = $EnableLogging.IsPresent
+    LogLevel      = $LogLevel
     Workspace     = $workspace
   }  
+  $script:log_target = "Application Factory Client"
   Set-AFClientSettings @params
   # Get current list of applications
 
@@ -27,12 +30,12 @@ function Start-AFClientProcess {
         $params.application_id = $application_name
       }
       $configurations = Get-AFApplicationConfigurations @params
-      Write-PSFMessage -Message "There are <c='green'>$($configurations.count)</c> applications configured in AppFactory"  -Level  "Output" -Tag "Process" -Target "Application Factory Client"
+      Write-AFLogEntry -Message "There are <c='green'>$($configurations.count)</c> applications configured in AppFactory"  -Tag "Process"
       if($configurations.count -eq 0){
-        Write-PSFMessage -Message "No applications found for processing."  -Level  "Warning" -Tag "Process" -Target "Application Factory Client"
+        Write-AFLogEntry -Message "No applications found for processing."  -Level  "Warning" -Tag "Process"
         return
       }
-      Write-PSFMessage -Message "Getting Current Intune Application List."  -Level  "Output" -Tag "Process" -Target "Application Factory Client"
+      Write-AFLogEntry -Message "Getting Current Intune Application List." -Tag "Process"
       Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
       $app_params = @{}
       if($application_name){
@@ -43,7 +46,7 @@ function Start-AFClientProcess {
       }
       $intune_apps = Get-IntuneWin32App @app_params
       foreach($configuration in $configurations){
-        Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Starting Process"  -Level  "Output" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Starting Process" -Tag "Process", $configuration.application.Name
         # Determine what version we should be looking for
         if($configuration.application.latest_version.raw_version){
           $script:published_version = $configuration.application.latest_version.raw_version
@@ -53,28 +56,28 @@ function Start-AFClientProcess {
         }
         $current_deployed = $intune_apps | Where-Object {$_.Notes -match "AppFactoryID:$($configuration.application.id)"} | Sort-Object createdDateTime -descending
         if($current_deployed -and $current_deployed.displayversion -eq $script:published_version -and -not $Force.IsPresent){
-          Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Application with version $($script:published_version) already exists in Intune. Skipping deployment." -Level "Warning" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+          Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Application with version $($script:published_version) already exists in Intune. Skipping deployment." -Level "Warning" -Tag "Process", $configuration.application.Name
         }
         else{
           try{
-            Get-AFApplicationClientFiles -configuration $configuration -LogLevel "Output"   
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Downloaded files." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+            Get-AFApplicationClientFiles -configuration $configuration
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Downloaded files." -Tag "Applications", "$($configuration.application.Name)"
             if($DownloadOnly.IsPresent){
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Download only flag is set. Skipping upload and assignment." -Level "Warning" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process"  -Level  "Output" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Download only flag is set. Skipping upload and assignment." -Level "Warning" -Tag "Process", $configuration.application.Name
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", $configuration.application.Name
               continue
             }
-            Publish-AFApplicationClientApp -configuration $configuration -LogLevel "Output"
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Created Intune File." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+            Publish-AFApplicationClientApp -configuration $configuration
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Created Intune File." -Tag "Applications", "$($configuration.application.Name)"
             if($configuration.copy_previous_assignments -and $current_deployed.count -gt 0){
-              Copy-AFApplicationClientGroups -intune_apps $current_deployed -LogLevel "Output"
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Copied group assignments." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+              Copy-AFApplicationClientGroups -intune_apps $current_deployed
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Copied group assignments." -Tag "Applications", "$($configuration.application.Name)"
             }
-            Set-AFApplicationClientGroups -configuration $configuration -LogLevel "Output"
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Set group assignments." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+            Set-AFApplicationClientGroups -configuration $configuration
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Set group assignments." -Tag "Applications", "$($configuration.application.Name)"
             if($configuration.esp_assignments){
-              Set-AFApplicationClientESPAssignments -configuration $configuration -LogLevel "Output"
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Added ESP assignments." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+              Set-AFApplicationClientESPAssignments -configuration $configuration
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Added ESP assignments." -Tag "Applications", "$($configuration.application.Name)"
             }
             if($configuration.unassign_previous_assignments){
               foreach($app in $current_deployed){
@@ -83,30 +86,30 @@ function Start-AFClientProcess {
                 Remove-IntuneWin32AppAssignment -id $app.id -WarningAction SilentlyContinue | Out-Null
                 $WarningPreference = $originalWarningPreference
               }
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Unassigned previous assignments." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Unassigned previous assignments." -Tag "Applications", "$($configuration.application.Name)"
             }
             for($x = $configuration.keep_previous_versions; $x -lt $current_deployed.count; $x++){
               Remove-IntuneWin32App -id $current_deployed[$x].id
             }
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Removed previous versions." -Level "Output" -Tag "Applications", "$($configuration.application.Name)" -Target "Application Factory Client"
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Removed previous versions." -Tag "Applications", "$($configuration.application.Name)"
           }
           catch{
             $err = $true
             $failed_app = Get-IntuneWin32App -DisplayName $app_params.DisplayName
             foreach($id in $(($failed_app | Where-Object {$_.uploadState -eq 0} | Select-Object id).id)){
-              Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name
               Remove-IntuneWin32App -id $id
             }            
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: $($_.Exception.Message)" -Level "Error" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: $($_.Exception.Message)" -Level "Error" -Tag "Process", $configuration.application.Name
             continue
           }
         }
-        Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process"  -Level  "Output" -Tag "Process", $configuration.application.Name -Target "Application Factory Client"
+        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", "$($configuration.application.Name)"
       }
     }
     catch {
       $err = $true
-      Write-PSFMessage -Message $_.Exception.Message -Level "Error" -Tag "Process" -Target "Application Factory Client"
+      Write-AFLogEntry -Message $_.Exception.Message -Level "Error" -Tag "Process", "$($configuration.application.Name)"
       $_
     }
     finally {
@@ -119,7 +122,7 @@ function Start-AFClientProcess {
       break
     }
     else {
-      Write-PSFMessage -Message "Errors encountered during processing. Retrying... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process" -Target "Application Factory Client"
+      Write-AFLogEntry -Message "[Application Factory] :: Errors encountered during processing. Retrying... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
       Start-Sleep -Seconds 60
     }
   }

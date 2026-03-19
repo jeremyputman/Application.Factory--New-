@@ -19,7 +19,8 @@ function Set-AFSettings {
   param(
     [Parameter(Mandatory = $true)][string]$configFile,
     [Parameter(Mandatory = $false)][string]$Workspace = $PSScriptRoot,
-    [Parameter()][switch]$EnableLogging
+    [Parameter()][switch]$EnableLogging,
+    [Parameter()][string]$LogLevel
   )
   # Enable logging if requested
   if($EnableLogging.IsPresent){
@@ -46,6 +47,7 @@ function Set-AFSettings {
   $script:api_header = $header
   $script:api_uri = $configuration.api.url
   $script:enable_logging = $EnableLogging
+  $script:log_level = $LogLevel
   $script:Workspace = Join-Path -Path $Workspace -ChildPath "Workspace"
   $script:LocalStorage = Join-Path -Path $Workspace -ChildPath "LocalStorage"
   $script:keyvault_name = $configuration.keyvault_name

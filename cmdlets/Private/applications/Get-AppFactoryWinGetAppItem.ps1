@@ -12,8 +12,7 @@ function Get-AppFactoryWinGetAppItem{
   [CmdletBinding()]
   [OutputType([PSCustomObject])]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output","Verbose")][string]$LogLevel = "Verbose"    
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application
   )
   # Search for the application using WinGet
   $arguments = @("search", "$($application.SourceFiles.AppID)")
@@ -22,7 +21,7 @@ function Get-AppFactoryWinGetAppItem{
   foreach ($RowItem in $winget) {
     if ($RowItem -eq "No package found matching input criteria.") {
       if($script:AppFactoryLogging){
-        Write-PSFMessage -Message "[$($application.Information.DisplayName)] No package found matching specified id: <c='green'>$($application.SourceFiles.AppId)</c>"  -Level "Error" -Tag "Process","Winget" -Target "Application Factory Service"
+        Write-AFLogEntry  -Message "[$($application.Information.DisplayName)] No package found matching specified id: <c='green'>$($application.SourceFiles.AppId)</c>"  -Level "Error" -Tag "Process","Winget"
       }
       return $null
     }

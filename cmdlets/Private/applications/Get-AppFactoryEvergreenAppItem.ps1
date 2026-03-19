@@ -10,11 +10,10 @@ function Get-AppFactoryEvergreenAppItem{
   [CmdletBinding()]
   [OutputType([PSCustomObject])]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output","Verbose")][string]$LogLevel = "Verbose"    
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application 
   )
   if($script:enable_logging){
-    Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Looking for Evergreen Application with AppID: <c='green'>$($application.SourceFiles.AppID)</c>"  -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service" 
+    Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Looking for Evergreen Application with AppID: <c='green'>$($application.SourceFiles.AppID)</c>"  -Tag "Application","$($application.information.Name)","Evergreen"
   }
 
   # Construct array list to build the dynamic filter list
@@ -22,49 +21,49 @@ function Get-AppFactoryEvergreenAppItem{
   # Process known filter properties and add them to array list if present on current object
   if ($Application.SourceFiles.FilterOptions.Architecture) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Architecture Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Architecture)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Architecture Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Architecture)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Architecture -eq ""$($Application.SourceFiles.FilterOptions.Architecture)""") | Out-Null
   }
   if ($Application.SourceFiles.FilterOptions.Platform) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Platform Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Platform)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Platform Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Platform)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Platform -eq ""$($Application.SourceFiles.FilterOptions.Platform)""") | Out-Null
   }
   if ($Application.SourceFiles.FilterOptions.Channel) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Channel Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Channel)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Channel Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Channel)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Channel -eq ""$($Application.SourceFiles.FilterOptions.Channel)""") | Out-Null
   }
   if ($Application.SourceFiles.FilterOptions.Type) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Type Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Type)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Type Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Type)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Type -eq ""$($Application.SourceFiles.FilterOptions.Type)""") | Out-Null
   }
   if ($Application.SourceFiles.FilterOptions.InstallerType) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: InstallerType Filter: <c='green'>$($Application.SourceFiles.FilterOptions.InstallerType)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: InstallerType Filter: <c='green'>$($Application.SourceFiles.FilterOptions.InstallerType)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.InstallerType -eq ""$($Application.SourceFiles.FilterOptions.InstallerType)""") | Out-Null
   }
   if ($Application.SourceFiles.FilterOptions.Release) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Release Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Release)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Release Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Release)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Release -eq ""$($Application.SourceFiles.FilterOptions.Release)""") | Out-Null
   }  
   if ($Application.SourceFiles.FilterOptions.Language) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: Language Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Language)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Language Filter: <c='green'>$($Application.SourceFiles.FilterOptions.Language)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.Language -eq ""$($Application.SourceFiles.FilterOptions.Language)""") | Out-Null
   }    
   if ($Application.SourceFiles.FilterOptions.ImageType) {
     if($script:enable_logging){
-      Write-PSFMessage -Message "[<c='green'>$($application.information.Name)</c>] :: ImageType Filter: <c='green'>$($Application.SourceFiles.FilterOptions.ImageType)</c>" -Level $LogLevel -Tag "Application","$($application.information.Name)","Evergreen" -Target "Application Factory Service"
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: ImageType Filter: <c='green'>$($Application.SourceFiles.FilterOptions.ImageType)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
     }
     $FilterList.Add("`$PSItem.ImageType -eq ""$($Application.SourceFiles.FilterOptions.ImageType)""") | Out-Null
   } 

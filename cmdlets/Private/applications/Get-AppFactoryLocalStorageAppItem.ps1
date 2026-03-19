@@ -11,8 +11,7 @@
 function Get-AppFactoryLocalStorageAppItem {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application
   )
   # Build the local application path and get the latest item
   $localAppPath = Join-Path -Path $script:LocalStorage -ChildPath $application.SourceFiles.StorageAccountContainerName

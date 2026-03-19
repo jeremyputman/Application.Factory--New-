@@ -27,8 +27,7 @@ function Import-AFECNOApp {
     [Parameter()][String[]]$publishTo = @(),
     [Parameter(Mandatory = $true)][string]$configFile,
     [Parameter(Mandatory = $true)][string]$workspace,
-    [Parameter()][switch]$EnableLogging,    
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter()][switch]$EnableLogging
   )
   # Set Application Factory API settings
   $params = @{
@@ -47,7 +46,7 @@ function Import-AFECNOApp {
     }
   }
   # Retrieve ECNO app details and download files
-  $details = Get-AppFactoryECNOAppItem -application $application -LogLevel $LogLevel
+  $details = Get-AppFactoryECNOAppItem -application $application
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $applicationName
   # Create path if it doesn't exist
   if (-not(Test-Path -Path $AppSetupFolderPath -PathType "Container")) {
@@ -58,7 +57,7 @@ function Import-AFECNOApp {
       throw "[$($application.Information.DisplayName)] Failed to create '$($Path)' with error message: $($_.Exception.Message)"
     }
   }
-  Get-AppFactoryECNOFile -Application $Application -version $details -destination $AppSetupFolderPath -LogLevel $LogLevel
+  Get-AppFactoryECNOFile -Application $Application -version $details -destination $AppSetupFolderPath
   # Read the config file to get details
   $configFile = Join-Path -Path $AppSetupFolderPath -ChildPath "_win32app.txt"
   $scriptFile = Join-Path -Path $AppSetupFolderPath -ChildPath "_detect.ps1"

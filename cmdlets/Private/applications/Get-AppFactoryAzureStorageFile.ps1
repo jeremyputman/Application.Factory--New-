@@ -13,8 +13,7 @@ function Get-AppFactoryAzureStorageFile{
   param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$version,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination
   )
   try{
     # Get credentials and create storage context

@@ -1,8 +1,7 @@
 function Set-AFApplicationClientGroups {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$configuration,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"      
+    [Parameter(Mandatory = $true)][PSCustomObject]$configuration   
   )
   $sections = @("assignment_available", "assignment_available_exceptions", "assignment_required", "assignment_required_exceptions", "assignment_uninstall", "assignment_uninstall_exceptions")
   $graph_header = @{
@@ -21,7 +20,7 @@ function Set-AFApplicationClientGroups {
     $details = $configuration.$section
     if ($details) {
       if ($script:enable_logging) {
-        Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Setting group assignments for $section." -Level $LogLevel -Tag "Groups", $configuration.application.Name -Target "Application Factory Client"
+        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Setting group assignments for $section." -Tag "Groups", $configuration.application.Name
       }
       foreach ($group in $details) {
         $params = @{
@@ -64,7 +63,7 @@ function Set-AFApplicationClientGroups {
           $uri = "https://graph.microsoft.com/beta/groups/?`$filter=displayName eq '$($group.name)'"
           $group_lookup = (Invoke-RestMethod -Method Get -Uri $uri -Headers $graph_header -StatusCodeVariable statusCode).value
           if(-not $group_lookup.id) { 
-            Write-PSFMessage -Message "[<c='green'>$($configuration.application.Name)</c>] :: Group '$($group.name)' not found in Entra AD. Skipping assignment." -Level Warning -Tag "Groups", $configuration.application.Name -Target "Application Factory Client"
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Group '$($group.name)' not found in Entra AD. Skipping assignment." -Level Warning -Tag "Groups", $configuration.application.Name
             continue
           }
           $params.Add("GroupID", $group_lookup.id)

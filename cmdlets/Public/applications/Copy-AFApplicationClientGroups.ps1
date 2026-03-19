@@ -1,8 +1,7 @@
 function Copy-AFApplicationClientGroups {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)]$intune_apps,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"   
+    [Parameter(Mandatory = $true)]$intune_apps
   )
   $last_application = $intune_apps | Sort-Object createdDateTime -descending | Select-Object id, displayname, *date* -first 1
   $assignments = Get-IntuneWin32AppAssignment -id $last_application.id

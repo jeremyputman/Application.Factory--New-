@@ -13,8 +13,7 @@ function Get-AppFactoryECNOFile{
   param(
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
     [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$version,
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][string]$destination
   )
   # # The PFX used to connect to the Sharepoint Configured
   $pfxPath = Join-Path -Path $script:Workspace -ChildPath $script:sharepoint_certificateFile

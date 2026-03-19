@@ -11,8 +11,7 @@
 function Get-AppFactorySharepointAppItem{
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose" 
+    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$application
   )
   # Prepare SharePoint connection configuration
   $pfxPath = Join-Path -Path $script:Workspace -ChildPath $script:sharepoint_certificateFile

@@ -24,8 +24,7 @@ function Add-AppFactoryAppMSI{
     [Parameter()][switch]$userInstall,
     [Parameter()][int[]]$SuccessExitCodes,
     [Parameter()][int[]]$rebootExitCodes,
-    [Parameter()][int[]]$ignoreExitCodes,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"
+    [Parameter()][int[]]$ignoreExitCodes
   )
   $ApplicationScriptLines = [System.Collections.Generic.List[String[]]]@()
   # Determine the path and command for MSI installer

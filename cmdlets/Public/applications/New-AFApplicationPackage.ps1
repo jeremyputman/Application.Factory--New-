@@ -18,8 +18,7 @@ function New-AFApplicationPackage {
   [cmdletbinding()]
   param(
     [Parameter(Mandatory = $true)][PSCustomObject]$Application,
-    [Parameter(Mandatory = $true)][PSCustomObject]$CurrentVersion,
-    [Parameter()][ValidateSet("Output", "Verbose")][string]$LogLevel = "Verbose"        
+    [Parameter(Mandatory = $true)][PSCustomObject]$CurrentVersion      
   )
   # Define paths for setup and publish folders
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $application.slug

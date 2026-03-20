@@ -46,6 +46,7 @@ function Import-AFECNOApp {
     }
   }
   # Retrieve ECNO app details and download files
+  Write-AFLogEntry -Message "[<c='green'>$($application)</c>] :: Starting Package" -Tag "Process", $application
   $details = Get-AppFactoryECNOAppItem -application $application
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $applicationName
   # Create path if it doesn't exist
@@ -97,5 +98,6 @@ function Import-AFECNOApp {
   # Create new application and set icon
   $response = New-AFApplication @new
   Set-AFApplicationIcon -id $response.id -iconpath $icon.FullName | Out-Null
-  return $response
+  Remove-Item -Path $AppSetupFolderPath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+  Write-AFLogEntry -Message "[<c='green'>$($application)</c>] :: Completed Package" -Tag "Process", $application
 }

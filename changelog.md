@@ -1,3 +1,6 @@
+# 0.1.9
+- Added some extra ECNO specific import logging and cleanup
+
 # 0.1.8
 - Added some missing cleanup functions
 

@@ -48,6 +48,7 @@ function Test-AFApplicationVersion {
       $current_version = Get-AppFactoryLocalStorageAppItem @params
     }
   }
+  Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Latest Version Packaged <c='green'>$($current_version.version)</c>" -Tag "Process", $application.information.Name
   # Determine lookup value for published versions
   if ($script:application_key -eq "guid") {
     $lookup_value = $Application.id
@@ -57,8 +58,12 @@ function Test-AFApplicationVersion {
   }
   # Check published versions for public or client-specific containers
   if($application.SourceFiles.publishTo.count -eq 0){
-    $app_versions = $script:application_packages.public | Where-Object { $_.app -eq $lookup_value } | Format-List
+    $app_versions = $script:application_packages.public | Where-Object { $_.app -eq $lookup_value }
+    Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Currently published versions <c='green'>$($app_versions.version -join ', ')</c> for <c='green'>public</c>" -Tag "Process", $application.information.Name
     if(-not $app_versions){
+      return $current_version
+    }
+    elseif($current_version.version -notin $app_versions.version){
       return $current_version
     }
   }
@@ -71,10 +76,14 @@ function Test-AFApplicationVersion {
       else{
         $org = ($client_list | Where-Object { $_.id -eq $publish.Id } | Select-Object -Property slug).slug
       }
-      $app_versions = $script:application_packages.$($org) | Where-Object { $_.app -eq $lookup_value } | Format-List
-      if(-not $app_versions){
+      $app_versions = $script:application_packages.$($org) | Where-Object { $_.app -eq $lookup_value }
+      Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Currently published versions <c='green'>$($app_versions.version -join ', ')</c> for <c='green'>$($org)</c>" -Tag "Process", $application.information.Name
+      if(-not $app_versions -and $current_version.version -notin $app_versions.version){
         return $current_version
       }
+      elseif($current_version.version -notin $app_versions.version){
+        return $current_version
+      }      
     }
   }
   if($force.IsPresent){

@@ -6,7 +6,7 @@
     RootModule = 'Application.Factory.psm1'
     
     # Version number of this module.
-    ModuleVersion = "0.1.6"
+    ModuleVersion = "0.1.8"
     
     # Supported PSEditions
     # CompatiblePSEditions = @()

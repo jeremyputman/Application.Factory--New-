@@ -85,7 +85,9 @@ function Publish-AFApplicationClientApp {
     $Win32AppArgs.Add("UninstallCommandLine", "Invoke-AppDeployToolkit.exe Uninstall -DeployMode Silent")
   }
   $script:published_application = Add-IntuneWin32App @Win32AppArgs -UseAzCopy -AzCopyWindowStyle Hidden -ErrorAction Stop -WarningAction Stop
-  Start-Sleep -Seconds 30
+  Write-AFLogEntry -Message "[<c='green'>$($application.Name)</c>] :: Published application to Intune with version <c='green'>$($script:published_version)</c>" -Tag "Applications", "$($application.Name)"
+  Write-AFLogEntry -Message "[<c='green'>$($application.Name)</c>] :: Sleeping for 60 seconds to try to prevent throttling." -Tag "Applications", "$($application.Name)"
+  Start-Sleep -Seconds 60
   if ($script:published_application.UploadState -eq 0) {
     Remove-IntuneWin32App -id $script:published_application.id
     throw "Failed to upload files."

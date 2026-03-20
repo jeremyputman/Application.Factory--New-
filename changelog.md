@@ -1,3 +1,12 @@
+# 0.1.8
+- Added some missing cleanup functions
+
+# 0.1.7
+- Bug fix for version comparing
+- Fix for active flag
+- Added some functions to try to help with throttling.
+- Bug fix for missing display name
+
 # 0.1.6
 - Modified logging functions
 

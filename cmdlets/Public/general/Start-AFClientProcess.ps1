@@ -30,12 +30,12 @@ function Start-AFClientProcess {
         $params.application_id = $application_name
       }
       $configurations = Get-AFApplicationConfigurations @params
-      Write-AFLogEntry -Message "There are <c='green'>$($configurations.count)</c> applications configured in AppFactory"  -Tag "Process"
+      Write-AFLogEntry -Message "[Application Factory] :: There are <c='green'>$($configurations.count)</c> applications configured in AppFactory"  -Tag "Process"
       if($configurations.count -eq 0){
-        Write-AFLogEntry -Message "No applications found for processing."  -Level  "Warning" -Tag "Process"
+        Write-AFLogEntry -Message "[Application Factory] :: No applications found for processing."  -Level  "Warning" -Tag "Process"
         return
       }
-      Write-AFLogEntry -Message "Getting Current Intune Application List." -Tag "Process"
+      Write-AFLogEntry -Message "[Application Factory] :: Getting Current Intune Application List." -Tag "Process"
       Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
       $app_params = @{}
       if($application_name){
@@ -59,11 +59,14 @@ function Start-AFClientProcess {
           Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Application with version $($script:published_version) already exists in Intune. Skipping deployment." -Level "Warning" -Tag "Process", $configuration.application.Name
         }
         else{
+          if ($Force.IsPresent) {
+            Write-AFLogEntry  -Message "[<c='green'>$($configuration.application.Name)</c>] :: <c='yellow'>Force flag</c> is set " -Tag "Process", $configuration.application.Name
+          }          
           try{
             Get-AFApplicationClientFiles -configuration $configuration
             Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Downloaded files." -Tag "Applications", "$($configuration.application.Name)"
             if($DownloadOnly.IsPresent){
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Download only flag is set. Skipping upload and assignment." -Level "Warning" -Tag "Process", $configuration.application.Name
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: <c='yellow'>Download only flag</c> is set. Skipping upload and assignment." -Level "Warning" -Tag "Process", $configuration.application.Name
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", $configuration.application.Name
               continue
             }
@@ -95,7 +98,8 @@ function Start-AFClientProcess {
           }
           catch{
             $err = $true
-            $failed_app = Get-IntuneWin32App -DisplayName $app_params.DisplayName
+            $display_name = "$($script:app_prefix)$($configuration.application.Name)*"
+            $failed_app = Get-IntuneWin32App -DisplayName $display_name
             foreach($id in $(($failed_app | Where-Object {$_.uploadState -eq 0} | Select-Object id).id)){
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name
               Remove-IntuneWin32App -id $id
@@ -104,6 +108,9 @@ function Start-AFClientProcess {
             continue
           }
         }
+        # Determine output file path for installer
+        $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Download" -AdditionalChildPath $configuration.application.slug
+        Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
         Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", "$($configuration.application.Name)"
       }
     }
@@ -123,7 +130,9 @@ function Start-AFClientProcess {
     }
     else {
       Write-AFLogEntry -Message "[Application Factory] :: Errors encountered during processing. Retrying... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
-      Start-Sleep -Seconds 60
+      Start-Sleep -Seconds 180
     }
   }
+  $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Download"
+  Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
 }

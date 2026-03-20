@@ -34,7 +34,7 @@ function Get-AFApplicationInstaller{
   $OutFilePath = Join-Path -Path $AppSetupFolderPath -ChildPath $application.SourceFiles.AppSetupFileName
   # Log download action if logging is enabled
   if($script:enable_logging){
-    Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Downloading setupfile <c='green'>$($CurrentVersion.URI)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
+    Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Downloading setupfile <c='green'>$($CurrentVersion.URI)</c> from <c='green'>$($Application.SourceFiles.AppSource)</c>" -Tag "Application","$($application.information.Name)","Evergreen"
   }
   # Prepare parameters for file retrieval
   $params = @{

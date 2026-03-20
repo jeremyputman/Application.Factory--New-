@@ -121,7 +121,7 @@ function Publish-AFApplication {
       try {
         Set-AzStorageBlobContent @upload -Container $container -Context $storageAccountContext -Force -ErrorAction Stop | Out-Null
         if ($script:enable_logging) {
-          Write-AFLogEntry -Message "[<c='green'>$($application.Information.Name)</c>] Uploaded <c='green'>$($upload.File)</c> to <c='green'>$($container)</c> container" -Tag "Application", "$($application.Information.Name)"
+          Write-AFLogEntry -Message "[<c='green'>$($application.Information.Name)</c>] Uploaded <c='green'>$($upload.File)</c> to $($container) container" -Tag "Application", "$($application.Information.Name)"
         }
       }
       catch {

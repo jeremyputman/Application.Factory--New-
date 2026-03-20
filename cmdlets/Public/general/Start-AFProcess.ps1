@@ -47,13 +47,13 @@ function Start-AFProcess {
   if ($application_id) {
     $params.id = $application_id
   }
-  $application_list = Get-AFApplications @params
+  $application_list = Get-AFApplications @params | Where-Object { -not $_.sourcefiles.pauseupdate -and $_.sourcefiles.active }
   # Check for new versions and create packages if needed
   $current_progress_preference = $ProgressPreference
   $ProgressPreference = "SilentlyContinue"
   try {
     Write-AFLogEntry -Message "[<c='green'>Application Factory</c>] :: There are <c='green'>$($application_list.count)</c> applications configured in AppFactory" -Tag Process
-    foreach ($application in ($application_list | Where-Object { -not $_.sourcefiles.pauseupdate })) {
+    foreach ($application in $application_list) {
       Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Starting Process" -Tag Process, $application.information.Name
       try {
         Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Checking for new version" -Tag "Process", $application.information.Name
@@ -87,7 +87,7 @@ function Start-AFProcess {
           Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Published Package" -Tag "Process", $application.information.Name
         }
         else {
-          Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: Test Mode is enabled - Skipping Publish" -Tag "Process", $application.information.Name
+          Write-AFLogEntry -Message "[<c='green'>$($application.information.Name)</c>] :: <c='yellow'>Test Mode</c> is enabled - Skipping Publish" -Tag "Process", $application.information.Name
         }
       }
       catch {
@@ -103,5 +103,9 @@ function Start-AFProcess {
   }
   finally {
     $ProgressPreference = $current_progress_preference
+    $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Installers"
+    Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+    $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Publish"
+    Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
   }
 }

@@ -27,12 +27,14 @@ function Import-AFECNOApp {
     [Parameter()][String[]]$publishTo = @(),
     [Parameter(Mandatory = $true)][string]$configFile,
     [Parameter(Mandatory = $true)][string]$workspace,
-    [Parameter()][switch]$EnableLogging
+    [Parameter()][switch]$EnableLogging,
+    [Parameter()][string]$LogLevel = "Verbose"
   )
   # Set Application Factory API settings
   $params = @{
     configFile    = $configFile
     EnableLogging = $EnableLogging.IsPresent
+    LogLevel      = $LogLevel
     Workspace     = $workspace
   }
   Set-AFSettings @params
@@ -46,7 +48,7 @@ function Import-AFECNOApp {
     }
   }
   # Retrieve ECNO app details and download files
-  Write-AFLogEntry -Message "[<c='green'>$($application)</c>] :: Starting Package" -Tag "Process", $application
+  Write-AFLogEntry -Message "[<c='green'>$($application.Information.DisplayName)</c>] :: Starting Package" -Tag "Process", $application.Information.DisplayName
   $details = Get-AppFactoryECNOAppItem -application $application
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $applicationName
   # Create path if it doesn't exist
@@ -99,5 +101,5 @@ function Import-AFECNOApp {
   $response = New-AFApplication @new
   Set-AFApplicationIcon -id $response.id -iconpath $icon.FullName | Out-Null
   Remove-Item -Path $AppSetupFolderPath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
-  Write-AFLogEntry -Message "[<c='green'>$($application)</c>] :: Completed Package" -Tag "Process", $application
+  Write-AFLogEntry -Message "[<c='green'>$($application.Information.DisplayName)</c>] :: Completed Package" -Tag "Process", $application.Information.DisplayName
 }

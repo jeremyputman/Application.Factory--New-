@@ -1,3 +1,7 @@
+# 0.1.10-12
+- Updated 7-zip exe
+- Updated ECNO functions
+
 # 0.1.9
 - Added some extra ECNO specific import logging and cleanup
 

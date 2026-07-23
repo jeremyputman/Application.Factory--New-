@@ -44,7 +44,7 @@ function Start-AFClientProcess {
       elseif($script:app_prefix){
         $app_params.DisplayName = "$($script:app_prefix)*"
       }
-      $intune_apps = Get-IntuneWin32App @app_params
+      $intune_apps = Get-AFIntuneWin32App @app_params
       foreach($configuration in $configurations){
         Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Starting Process" -Tag "Process", $configuration.application.Name
         # Determine what version we should be looking for
@@ -70,6 +70,7 @@ function Start-AFClientProcess {
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", $configuration.application.Name
               continue
             }
+            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Creating Intune File." -Tag "Applications", "$($configuration.application.Name)"
             Publish-AFApplicationClientApp -configuration $configuration
             Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Created Intune File." -Tag "Applications", "$($configuration.application.Name)"
             if($configuration.copy_previous_assignments -and $current_deployed.count -gt 0){
@@ -93,13 +94,13 @@ function Start-AFClientProcess {
             }
             for($x = $configuration.keep_previous_versions; $x -lt $current_deployed.count; $x++){
               Remove-IntuneWin32App -id $current_deployed[$x].id
+              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Removed previous versions ($($current_deployed.count - $configuration.keep_previous_versions))." -Tag "Applications", "$($configuration.application.Name)"
             }
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Removed previous versions." -Tag "Applications", "$($configuration.application.Name)"
           }
           catch{
             $err = $true
             $display_name = "$($script:app_prefix)$($configuration.application.Name)*"
-            $failed_app = Get-IntuneWin32App -DisplayName $display_name
+            $failed_app = Get-AFIntuneWin32App -failed -DisplayName $display_name
             foreach($id in $(($failed_app | Where-Object {$_.uploadState -eq 0} | Select-Object id).id)){
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name
               Remove-IntuneWin32App -id $id
@@ -129,6 +130,21 @@ function Start-AFClientProcess {
       break
     }
     else {
+      Write-AFLogEntry -Message "[Application Factory] :: Errors occured, looking for bad uploads to clean up... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
+
+      $app_params = @{}
+      if($application_name){
+        $app_params.DisplayName = "$($script:app_prefix)$($application_name)*"
+      }
+      elseif($script:app_prefix){
+        $app_params.DisplayName = "$($script:app_prefix)*"
+      }
+      Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
+      $intune_apps = Get-AFIntuneWin32App @app_params -failed
+      foreach($app in $intune_apps){
+        Write-AFLogEntry -Message "[<c='green'>$($app.DisplayName)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $app.DisplayName
+        Remove-IntuneWin32App -id $app.id
+      }
       Write-AFLogEntry -Message "[Application Factory] :: Errors encountered during processing. Retrying... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
       Start-Sleep -Seconds 180
     }

@@ -7,5 +7,5 @@ $workspace_path = "C:\DevOps\Application.Factory"
 #Update-Evergreen -Force *> $null
 
 $application = "7-Zip"
-Start-AFProcess -configFile $config_file_path -workspace $workspace_path -application $application -EnableLogging -LogLevel "Output" -Force #-TestMode 
+Start-AFProcess -configFile $config_file_path -workspace $workspace_path -EnableLogging -LogLevel "Output" #-application $application -Force #-TestMode 
 # Start-AFProcess -configFile $config_file_path -workspace $workspace_path -EnableLogging -LogLevel "Output" #-TestMode #-Force

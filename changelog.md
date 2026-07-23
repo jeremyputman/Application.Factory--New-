@@ -1,3 +1,13 @@
+# 0.1.15
+- Added a check if ArgumentList is empty
+
+# 0.1.14
+- Implemented a cmdlet to get the applications that can filter for notes field and upload state
+- Fix for test mode with the new finally block
+
+# 0.1.13
+- Added additional check for bad uploads. There is a chance for a race condition if two people are running the script at the same time.
+
 # 0.1.10-12
 - Updated 7-zip exe
 - Updated ECNO functions

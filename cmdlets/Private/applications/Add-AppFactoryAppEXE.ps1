@@ -31,17 +31,29 @@ function Add-AppFactoryAppEXE{
   }
   # Build the command for user or system context
   if($userInstall.IsPresent){
-    $execute = "Start-ADTProcessAsUser -FilePath $($executePath) -ArgumentList `"`$(`$argumentList)`""
+    if($argumentList){
+      $execute = "Start-ADTProcessAsUser -FilePath $($executePath) -ArgumentList `"`$(`$argumentList)`""
+    }
+    else{
+      $execute = "Start-ADTProcessAsUser -FilePath $($executePath)"
+    }
   }
   else{
-    $execute = "Start-ADTProcess -FilePath $($executePath) -ArgumentList `"`$(`$argumentList)`""
+    if($argumentList){
+      $execute = "Start-ADTProcess -FilePath $($executePath) -ArgumentList `"`$(`$argumentList)`""
+    }
+    else{
+      $execute = "Start-ADTProcess -FilePath $($executePath)"
+    }
   }
   if ($PSBoundParameters.ContainsKey("secureArgumentList") -and $secureArgumentList) {$execute = "$($execute) -secureArgumentList"}  
   if ($PSBoundParameters.ContainsKey("SuccessExitCodes") -and $SuccessExitCodes) {$execute = "$($execute) -SuccessExitCodes $($SuccessExitCodes -join ",")"}  
   if ($PSBoundParameters.ContainsKey("rebootExitCodes") -and $rebootExitCodes) {$execute = "$($execute) -rebootExitCodes $($rebootExitCodes -join ",")"}  
   if ($PSBoundParameters.ContainsKey("ignoreExitCodes") -and $ignoreExitCodes) {$execute = "$($execute) -ignoreExitCodes $($ignoreExitCodes -join ",")"}  
   $ApplicationScriptLines.Add("`t`$AppSetupFileName = `"$($AppSetupFileName)`"") | Out-Null
-  $ApplicationScriptLines.Add("`t`$argumentList = `"$($argumentList)`"") | Out-Null
+  if($argumentList){
+    $ApplicationScriptLines.Add("`t`$argumentList = `"$($argumentList)`"") | Out-Null
+  }
   $ApplicationScriptLines.Add("`t$($execute)") | Out-Null
   return @(,$ApplicationScriptLines)  
 }

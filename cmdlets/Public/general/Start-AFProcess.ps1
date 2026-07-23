@@ -103,9 +103,11 @@ function Start-AFProcess {
   }
   finally {
     $ProgressPreference = $current_progress_preference
-    $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Installers"
-    Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
-    $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Publish"
-    Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+    if (-not $TestMode.IsPresent) {     
+      $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Installers"
+      Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+      $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Publish"
+      Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+    }
   }
 }

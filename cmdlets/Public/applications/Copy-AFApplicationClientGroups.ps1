@@ -1,7 +1,8 @@
 function Copy-AFApplicationClientGroups {
   [cmdletbinding()]
   param(
-    [Parameter(Mandatory = $true)]$intune_apps
+    [Parameter(Mandatory = $true)]$intune_apps,
+    [Parameter(Mandatory = $true)][PSCustomObject]$configuration
   )
   $last_application = $intune_apps | Sort-Object createdDateTime -descending | Select-Object id, displayname, *date* -first 1
   $assignments = Get-IntuneWin32AppAssignment -id $last_application.id
@@ -12,7 +13,7 @@ function Copy-AFApplicationClientGroups {
     $filters.Add($filter_details[0], @{name = $filter_details[1]; type = $filter_details[2] })
   }
   foreach ($assignment in $assignments) {
-    if(-not $assignment.GroupName){continue}
+    if (-not $assignment.GroupName) { continue }
     $params = @{
       "id"      = $script:published_application.id
       "intent"  = $assignment.intent

@@ -39,10 +39,10 @@ function Start-AFClientProcess {
       Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
       $app_params = @{}
       if($application_name){
-        $app_params.DisplayName = "$($script:app_prefix)$($application_name)*"
+        $app_params.DisplayName = "$($script:app_prefix)$($application_name)"
       }
       elseif($script:app_prefix){
-        $app_params.DisplayName = "$($script:app_prefix)*"
+        $app_params.DisplayName = $script:app_prefix
       }
       $intune_apps = Get-AFIntuneWin32App @app_params
       foreach($configuration in $configurations){
@@ -74,7 +74,7 @@ function Start-AFClientProcess {
             Publish-AFApplicationClientApp -configuration $configuration
             Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Created Intune File." -Tag "Applications", "$($configuration.application.Name)"
             if($configuration.copy_previous_assignments -and $current_deployed.count -gt 0){
-              Copy-AFApplicationClientGroups -intune_apps $current_deployed
+              Copy-AFApplicationClientGroups -intune_apps $current_deployed -configuration $configuration
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Copied group assignments." -Tag "Applications", "$($configuration.application.Name)"
             }
             Set-AFApplicationClientGroups -configuration $configuration
@@ -99,7 +99,7 @@ function Start-AFClientProcess {
           }
           catch{
             $err = $true
-            $display_name = "$($script:app_prefix)$($configuration.application.Name)*"
+            $display_name = "$($script:app_prefix)$($configuration.application.Name)"
             $failed_app = Get-AFIntuneWin32App -failed -DisplayName $display_name
             foreach($id in $(($failed_app | Where-Object {$_.uploadState -eq 0} | Select-Object id).id)){
               Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name

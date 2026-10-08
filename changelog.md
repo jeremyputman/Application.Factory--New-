@@ -1,3 +1,7 @@
+# 0.2.0
+- Bug fix for leaking variable scope in Copy-AFApplicationClientGroups
+- Working at removing dependency on external Intune powershell module
+
 # 0.1.15
 - Added a check if ArgumentList is empty
 

@@ -2,14 +2,14 @@ function Get-AFClientAssignmentPlan {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory)][PSCustomObject]$Configuration,
-    [object[]]$PreviousApps = @()
+    [object[]]$PreviousApps = @(),
+    [switch]$CopyOnly,
+    [string]$SeedAppId
   )
 
   $filters = @{}
-  $expected = [Collections.Generic.List[string]]::new()
-  $baseTargets = @{}
+  $rows = @{}
 
-  # Parse the existing GroupName;FilterName;Mode format.
   if (-not [string]::IsNullOrWhiteSpace(
       [string]$Configuration.filters
     )) {
@@ -44,42 +44,42 @@ function Get-AFClientAssignmentPlan {
     }
   }
 
-  $assignments = [Collections.Generic.List[object]]::new()
+  $sourceId = $SeedAppId
 
-  # Capture the source assignments before publishing or removing anything.
   if (
-    $Configuration.copy_previous_assignments -and
+    -not $sourceId -and
+    ($CopyOnly -or $Configuration.copy_previous_assignments) -and
     $PreviousApps.Count -gt 0
   ) {
     $source = $PreviousApps |
     Sort-Object createdDateTime -Descending |
     Select-Object -First 1
 
+    $sourceId = [string]$source.id
+  }
+
+  if ($sourceId) {
     foreach ($assignment in @(
         Get-AFClientGraphCollection -Uri (
-          "deviceAppManagement/mobileApps/$($source.id)/assignments"
+          "deviceAppManagement/mobileApps/$sourceId/assignments"
         )
       )) {
-      # Clone the object before applying configured filter overrides.
-      $copy = $assignment |
-      ConvertTo-Json -Depth 20 |
-      ConvertFrom-Json
-
-      $type = ([string]$copy.target.'@odata.type').TrimStart('#')
+      $body = ConvertTo-AFNativeAssignmentBody -Assignment $assignment
+      $type = ([string]$body.target.'@odata.type').TrimStart('#')
       $targetName = ""
 
       switch ($type) {
         "microsoft.graph.groupAssignmentTarget" {
           $group = Invoke-AFNativeGraphRequest `
             -Method GET `
-            -Uri "groups/$($copy.target.groupId)"
+            -Uri "groups/$($body.target.groupId)"
 
           $targetName = [string]$group.displayName
         }
         "microsoft.graph.exclusionGroupAssignmentTarget" {
           $group = Invoke-AFNativeGraphRequest `
             -Method GET `
-            -Uri "groups/$($copy.target.groupId)"
+            -Uri "groups/$($body.target.groupId)"
 
           $targetName = [string]$group.displayName
         }
@@ -89,126 +89,160 @@ function Get-AFClientAssignmentPlan {
         "microsoft.graph.allLicensedUsersAssignmentTarget" {
           $targetName = "All Users"
         }
-        default {
-          throw "Cannot verify copied assignment type '$type'."
-        }
       }
 
       if ($filters.ContainsKey($targetName)) {
-        $copy.target | Add-Member `
-          -NotePropertyName deviceAndAppManagementAssignmentFilterId `
-          -NotePropertyValue $filters[$targetName].Id `
-          -Force
+        $body.target.deviceAndAppManagementAssignmentFilterId =
+        $filters[$targetName].Id
 
-        $copy.target | Add-Member `
-          -NotePropertyName deviceAndAppManagementAssignmentFilterType `
-          -NotePropertyValue $filters[$targetName].Type `
-          -Force
+        $body.target.deviceAndAppManagementAssignmentFilterType =
+        $filters[$targetName].Type
       }
-
-      $assignments.Add($copy)
-    }
-  }
-
-  $sections = @{
-    assignment_available            = @("available", $false)
-    assignment_available_exceptions = @("available", $true)
-    assignment_required             = @("required", $false)
-    assignment_required_exceptions  = @("required", $true)
-    assignment_uninstall            = @("uninstall", $false)
-    assignment_uninstall_exceptions = @("uninstall", $true)
-  }
-
-  foreach ($section in $sections.Keys) {
-    foreach ($group in @($Configuration.$section)) {
-      if ($null -eq $group) {
-        continue
-      }
-
-      $name = [string]$group.name
-
-      if ([string]::IsNullOrWhiteSpace($name)) {
-        throw "An assignment in '$section' has no group name."
-      }
-
-      $exclude = [bool]$sections[$section][1]
 
       if (
-        $exclude -and
-        $name -in @("All Users", "All Devices")
+        $Configuration.download_foreground -and
+        $null -ne $body.settings
       ) {
-        throw (
-          "The existing assignment helper does not support " +
-          "excluding '$name'. Use an exclusion group."
-        )
+        $body.settings["deliveryOptimizationPriority"] = "foreground"
       }
 
-      $target = @{
-        deviceAndAppManagementAssignmentFilterId   = ""
-        deviceAndAppManagementAssignmentFilterType = "none"
+      $baseKey = Get-AFNativeAssignmentBaseKey -Assignment $body
+
+      if ($rows.ContainsKey($baseKey)) {
+        throw "Source application has duplicate target/intent assignments: $baseKey"
       }
 
-      switch ($name) {
-        "All Users" {
-          $target["@odata.type"] =
-          "#microsoft.graph.allLicensedUsersAssignmentTarget"
-        }
-        "All Devices" {
-          $target["@odata.type"] =
-          "#microsoft.graph.allDevicesAssignmentTarget"
-        }
-        default {
-          $lookup = Get-AFClientUniqueGraphObject `
-            -Resource "groups" `
-            -DisplayName $name
-
-          $target.groupId = [string]$lookup.id
-
-          $target["@odata.type"] = if ($exclude) {
-            "#microsoft.graph.exclusionGroupAssignmentTarget"
-          }
-          else {
-            "#microsoft.graph.groupAssignmentTarget"
-          }
-        }
-      }
-
-      if ($filters.ContainsKey($name)) {
-        $target.deviceAndAppManagementAssignmentFilterId =
-        $filters[$name].Id
-
-        $target.deviceAndAppManagementAssignmentFilterType =
-        $filters[$name].Type
-      }
-
-      $assignments.Add([PSCustomObject]@{
-          intent = [string]$sections[$section][0]
-          target = [PSCustomObject]$target
-        })
+      $rows[$baseKey] = $body
     }
   }
 
-  foreach ($assignment in $assignments) {
-    $key = Get-AFClientAssignmentKey -Assignment $assignment
-    $baseKey = (
-      $key.Split("|")[0..2] -join "|"
-    )
-
-    if (
-      $baseTargets.ContainsKey($baseKey) -and
-      $baseTargets[$baseKey] -ne $key
-    ) {
-      throw (
-        "Copied and configured assignments specify conflicting " +
-        "filters for the same target and intent: $baseKey"
-      )
+  if (-not $CopyOnly) {
+    $sections = [ordered]@{
+      assignment_available            = @("available", $false)
+      assignment_available_exceptions = @("available", $true)
+      assignment_required             = @("required", $false)
+      assignment_required_exceptions  = @("required", $true)
+      assignment_uninstall            = @("uninstall", $false)
+      assignment_uninstall_exceptions = @("uninstall", $true)
     }
 
-    $baseTargets[$baseKey] = $key
-    $expected.Add($key)
+    foreach ($section in $sections.Keys) {
+      foreach ($group in @($Configuration.$section)) {
+        if ($null -eq $group) {
+          continue
+        }
+
+        $name = [string]$group.name
+
+        if ([string]::IsNullOrWhiteSpace($name)) {
+          throw "An assignment in '$section' has no group name."
+        }
+
+        $exclude = [bool]$sections[$section][1]
+
+        if (
+          $exclude -and
+          $name -in @("All Users", "All Devices")
+        ) {
+          throw "Use an exclusion group instead of excluding '$name'."
+        }
+
+        $target = @{
+          deviceAndAppManagementAssignmentFilterId   = ""
+          deviceAndAppManagementAssignmentFilterType = "none"
+        }
+
+        switch ($name) {
+          "All Users" {
+            $target["@odata.type"] =
+            "#microsoft.graph.allLicensedUsersAssignmentTarget"
+          }
+          "All Devices" {
+            $target["@odata.type"] =
+            "#microsoft.graph.allDevicesAssignmentTarget"
+          }
+          default {
+            $lookup = Get-AFClientUniqueGraphObject `
+              -Resource "groups" `
+              -DisplayName $name
+
+            $target.groupId = [string]$lookup.id
+
+            $target["@odata.type"] = if ($exclude) {
+              "#microsoft.graph.exclusionGroupAssignmentTarget"
+            }
+            else {
+              "#microsoft.graph.groupAssignmentTarget"
+            }
+          }
+        }
+
+        $body = [PSCustomObject]@{
+          "@odata.type" = "#microsoft.graph.mobileAppAssignment"
+          intent        = [string]$sections[$section][0]
+          target        = [PSCustomObject]$target
+          settings      = $null
+        }
+
+        $baseKey = Get-AFNativeAssignmentBaseKey -Assignment $body
+
+        if ($rows.ContainsKey($baseKey)) {
+          $existing = $rows[$baseKey]
+
+          # Preserve the copied filter unless explicitly overridden.
+          $body.target.deviceAndAppManagementAssignmentFilterId =
+          $existing.target.deviceAndAppManagementAssignmentFilterId
+
+          $body.target.deviceAndAppManagementAssignmentFilterType =
+          $existing.target.deviceAndAppManagementAssignmentFilterType
+
+          $body.settings = $existing.settings
+        }
+        elseif (-not $exclude) {
+          $body.settings = @{
+            "@odata.type"                =
+            "#microsoft.graph.win32LobAppAssignmentSettings"
+            notifications                = "showAll"
+            deliveryOptimizationPriority = "notConfigured"
+          }
+        }
+
+        if ($filters.ContainsKey($name)) {
+          $body.target.deviceAndAppManagementAssignmentFilterId =
+          $filters[$name].Id
+
+          $body.target.deviceAndAppManagementAssignmentFilterType =
+          $filters[$name].Type
+        }
+
+        if (
+          $Configuration.download_foreground -and
+          $null -ne $body.settings
+        ) {
+          $body.settings["deliveryOptimizationPriority"] = "foreground"
+        }
+
+        $rows[$baseKey] = ConvertTo-AFNativeAssignmentBody `
+          -Assignment $body
+      }
+    }
   }
+
+  $assignments = @(
+    foreach ($key in @($rows.Keys | Sort-Object)) {
+      $rows[$key]
+    }
+  )
 
   [PSCustomObject]@{
-    ExpectedKeys = @($expected | Sort-Object -Unique)
+    SourceAppId  = $sourceId
+    Assignments  = $assignments
+    ExpectedKeys = @(
+      $assignments |
+      ForEach-Object {
+        Get-AFClientAssignmentKey -Assignment $_
+      } |
+      Sort-Object -Unique
+    )
   }
 }

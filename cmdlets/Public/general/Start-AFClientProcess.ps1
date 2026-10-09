@@ -474,14 +474,8 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        # Existing assignment functions still use IntuneWin32App
-        # and its global token. Refresh after a potentially long upload.
-        Connect-MSIntuneGraph `
-          -TenantID $script:appregistration_tenant `
-          -ClientID $script:appregistration_client `
-          -ClientSecret $script:appregistration_secret |
-        Out-Null
-
+        # Apply the exact native plan captured before publishing.
+        # Graph authentication refreshes through Invoke-AFNativeGraphRequest.
         $stage = "ApplyAssignments"
         $journal.Stage = $stage
 
@@ -489,19 +483,9 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        if (
-          $configuration.copy_previous_assignments -and
-          $previousApps.Count -gt 0
-        ) {
-          Copy-AFApplicationClientGroups `
-            -intune_apps $previousApps `
-            -configuration $configuration `
-            -ErrorAction Stop |
-          Out-Null
-        }
-
         Set-AFApplicationClientGroups `
           -configuration $configuration `
+          -Plan $plan `
           -ErrorAction Stop |
         Out-Null
 
@@ -528,39 +512,23 @@ function Start-AFClientProcess {
           -Journal $journal
 
         if (-not $SkipPreviousVersionCleanup) {
-          foreach ($previous in $previousApps) {
-            # Recheck identity and readiness by exact ID.
-            $confirmedPrevious = Assert-AFClientPublishedApp `
-              -AppId ([string]$previous.id) `
-              -ApplicationId $appId `
-              -Version ([string]$previous.displayVersion) `
-              -TimeoutSeconds 0
-
-            if ($confirmedPrevious.id -eq $journal.AppId) {
-              throw "Previous-version cleanup selected the new application."
-            }
-          }
+          # Reconfirm the new app before touching previous versions.
+          Assert-AFClientPublishedApp `
+            -AppId $journal.AppId `
+            -ApplicationId $appId `
+            -Version $version `
+            -TimeoutSeconds 0 |
+          Out-Null
 
           if ($configuration.unassign_previous_assignments) {
             foreach ($previous in $previousApps) {
-              Remove-IntuneWin32AppAssignment `
-                -id $previous.id `
+              Remove-AFIntuneAppAssignments `
+                -Id ([guid]$previous.id) `
+                -ApplicationId $appId `
+                -Version ([string]$previous.displayVersion) `
+                -ProtectedAppId $journal.AppId `
                 -ErrorAction Stop |
               Out-Null
-
-              $remaining = @(
-                Get-AFClientGraphCollection -Uri (
-                  "deviceAppManagement/mobileApps/" +
-                  "$($previous.id)/assignments"
-                )
-              )
-
-              if ($remaining.Count -gt 0) {
-                throw (
-                  "Previous app $($previous.id) still has assignments. " +
-                  "Cleanup stopped."
-                )
-              }
             }
           }
 
@@ -569,33 +537,17 @@ function Start-AFClientProcess {
             $index -lt $previousApps.Count;
             $index++
           ) {
-            $oldId = [string]$previousApps[$index].id
+            $previous = $previousApps[$index]
 
-            Remove-IntuneWin32App `
-              -id $oldId `
+            Remove-AFIntuneWin32App `
+              -Id ([guid]$previous.id) `
+              -ApplicationId $appId `
+              -Version ([string]$previous.displayVersion) `
+              -ProtectedAppId $journal.AppId `
               -ErrorAction Stop |
             Out-Null
-
-            try {
-              Invoke-AFNativeGraphRequest `
-                -Method GET `
-                -Uri "deviceAppManagement/mobileApps/$oldId" |
-              Out-Null
-            }
-            catch {
-              if ([int]$_.Exception.Data["HttpStatus"] -eq 404) {
-                continue
-              }
-
-              throw
-            }
-
-            throw (
-              "Previous app $oldId is still visible after deletion. " +
-              "Cleanup stopped."
-            )
           }
-        }
+        }        
 
         $stage = "Complete"
         $journal.State = "Complete"

@@ -1,0 +1,102 @@
+function Remove-AFIntuneAppAssignments {
+  [CmdletBinding(SupportsShouldProcess)]
+  param(
+    [Parameter(Mandatory)][guid]$Id,
+    [Parameter(Mandatory)][string]$ApplicationId,
+    [Parameter(Mandatory)][string]$Version,
+    [string]$ProtectedAppId = [string]$script:published_application.id,
+    [ValidateRange(0, 600)][int]$TimeoutSeconds = 120
+  )
+
+  $app = Get-AFNativeManagedApp `
+    -Id $Id `
+    -ApplicationId $ApplicationId `
+    -Version $Version `
+    -ProtectedAppId $ProtectedAppId
+
+  if ($null -eq $app) {
+    return
+  }
+
+  if (-not $PSCmdlet.ShouldProcess(
+      "$($app.displayName) [$Id]",
+      "Remove application assignments"
+    )) {
+    return
+  }
+
+  $uri = "deviceAppManagement/mobileApps/$Id/assignments"
+  $assignments = @(Get-AFClientGraphCollection -Uri $uri)
+
+  foreach ($assignment in $assignments) {
+    $assignmentId = [guid]$assignment.id
+
+    if ($assignmentId -eq [guid]::Empty) {
+      throw "An assignment has no valid assignment ID."
+    }
+
+    try {
+      Invoke-AFNativeGraphRequest `
+        -Method DELETE `
+        -Uri "$uri/$assignmentId" | Out-Null
+    }
+    catch {
+      $status = [int]$_.Exception.Data["HttpStatus"]
+
+      if ($status -eq 404) {
+        continue
+      }
+
+      if ($status -notin @(0, 408, 500, 502, 503, 504)) {
+        throw
+      }
+
+      # Verify an ambiguous deletion response.
+      try {
+        Invoke-AFNativeGraphRequest `
+          -Method GET `
+          -Uri "$uri/$assignmentId" | Out-Null
+      }
+      catch {
+        if ([int]$_.Exception.Data["HttpStatus"] -eq 404) {
+          continue
+        }
+
+        throw
+      }
+
+      throw "Could not confirm deletion of assignment $assignmentId."
+    }
+  }
+
+  $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+
+  do {
+    try {
+      $remaining = @(Get-AFClientGraphCollection -Uri $uri)
+    }
+    catch {
+      if ([int]$_.Exception.Data["HttpStatus"] -eq 404) {
+        return
+      }
+
+      throw
+    }
+
+    if ($remaining.Count -eq 0) {
+      return
+    }
+
+    if ([DateTimeOffset]::UtcNow -ge $deadline) {
+      break
+    }
+
+    Start-Sleep -Seconds 5
+  }
+  while ($true)
+
+  throw (
+    "Application $Id still has assignments after removal. " +
+    "A concurrent change or incomplete deletion may have occurred."
+  )
+}

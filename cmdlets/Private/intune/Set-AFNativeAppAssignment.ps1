@@ -10,9 +10,7 @@ function Set-AFNativeAppAssignment {
   $baseKey = Get-AFNativeAssignmentBaseKey -Assignment $body
   $uri = "deviceAppManagement/mobileApps/$AppId/assignments"
 
-  $current = @(
-    Get-AFClientGraphCollection -Uri $uri
-  )
+  $current = @(Get-AFClientGraphCollection -Uri $uri)
 
   $matches = @(
     $current | Where-Object {
@@ -33,25 +31,59 @@ function Set-AFNativeAppAssignment {
     return
   }
 
+  $updating = $matches.Count -eq 1
+  $expected = @($body)
+  $writeUri = $uri
+  $writeBody = $body
+
+  if ($updating) {
+    # The assign action receives the complete desired collection.
+    # Preserve every existing assignment except the requested change.
+    $seen = @{}
+
+    $expected = @(
+      foreach ($existing in $current) {
+        $source = [string]$existing.source
+
+        if ($source -and $source -ne "direct") {
+          throw (
+            "Cannot rewrite an assignment collection containing " +
+            "a non-direct assignment. Source=$source; " +
+            "AssignmentId=$($existing.id)"
+          )
+        }
+
+        $key = Get-AFNativeAssignmentBaseKey -Assignment $existing
+
+        if ($seen.ContainsKey($key)) {
+          throw "Duplicate target/intent in the current collection: $key"
+        }
+
+        $seen[$key] = $true
+
+        if ($key -eq $baseKey) {
+          $body
+        }
+        else {
+          ConvertTo-AFNativeAssignmentBody -Assignment $existing
+        }
+      }
+    )
+
+    $writeUri = "deviceAppManagement/mobileApps/$AppId/assign"
+    $writeBody = @{
+      mobileAppAssignments = @($expected)
+    }
+  }
+
   $writeFailure = ""
 
   try {
-    if ($matches.Count -eq 1) {
-      if (-not $matches[0].id) {
-        throw "Existing assignment has no assignment ID."
-      }
-
-      Invoke-AFNativeGraphRequest `
-        -Method PATCH `
-        -Uri "$uri/$($matches[0].id)" `
-        -Body $body | Out-Null
-    }
-    else {
-      Invoke-AFNativeGraphRequest `
-        -Method POST `
-        -Uri $uri `
-        -Body $body | Out-Null
-    }
+    Invoke-AFNativeGraphRequest `
+      -Method POST `
+      -Uri $writeUri `
+      -Body $writeBody |
+    Out-Null
   }
   catch {
     $status = [int]$_.Exception.Data["HttpStatus"]
@@ -60,32 +92,48 @@ function Set-AFNativeAppAssignment {
       throw
     }
 
-    # A lost response may conceal a successful write.
-    # Read back rather than blindly creating another assignment.
+    # An ambiguous response may conceal a successful write.
+    # Reconcile through GETs instead of repeating the POST.
     $writeFailure = $_.Exception.Message
   }
 
   $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
 
   do {
-    $confirmed = @(
-      Get-AFClientGraphCollection -Uri $uri |
-      Where-Object {
-        (Get-AFNativeAssignmentBaseKey -Assignment $_) -eq
-        $baseKey
-      }
-    )
+    $actual = @(Get-AFClientGraphCollection -Uri $uri)
+    $allMatched = $true
 
-    if ($confirmed.Count -gt 1) {
-      throw "Duplicate assignments detected after writing: $baseKey"
+    if ($updating -and $actual.Count -ne $expected.Count) {
+      $allMatched = $false
     }
 
-    if (
-      $confirmed.Count -eq 1 -and
-      (Test-AFNativeAssignmentMatches `
-        -Expected $body `
-        -Actual $confirmed[0])
-    ) {
+    foreach ($desired in $expected) {
+      $desiredKey = Get-AFNativeAssignmentBaseKey -Assignment $desired
+
+      $confirmed = @(
+        $actual | Where-Object {
+          (Get-AFNativeAssignmentBaseKey -Assignment $_) -eq
+          $desiredKey
+        }
+      )
+
+      if ($confirmed.Count -gt 1) {
+        throw "Duplicate assignments detected after writing: $desiredKey"
+      }
+
+      if ($confirmed.Count -ne 1) {
+        $allMatched = $false
+        continue
+      }
+
+      if (-not (Test-AFNativeAssignmentMatches `
+            -Expected $desired `
+            -Actual $confirmed[0])) {
+        $allMatched = $false
+      }
+    }
+
+    if ($allMatched) {
       return
     }
 

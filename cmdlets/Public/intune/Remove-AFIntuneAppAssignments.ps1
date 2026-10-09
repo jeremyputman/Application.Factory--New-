@@ -29,16 +29,32 @@ function Remove-AFIntuneAppAssignments {
   $assignments = @(Get-AFClientGraphCollection -Uri $uri)
 
   foreach ($assignment in $assignments) {
-    $assignmentId = [guid]$assignment.id
+    $assignmentId = [string]$assignment.id
 
-    if ($assignmentId -eq [guid]::Empty) {
-      throw "An assignment has no valid assignment ID."
+    if ([string]::IsNullOrWhiteSpace($assignmentId)) {
+      throw "An assignment has no assignment ID."
     }
+
+    # Revalidate ownership immediately before each deletion.
+    $verifiedApp = Get-AFNativeManagedApp `
+      -Id $Id `
+      -ApplicationId $ApplicationId `
+      -Version $Version `
+      -ProtectedAppId $ProtectedAppId
+
+    if ($null -eq $verifiedApp) {
+      return
+    }
+
+    # Assignment IDs are opaque strings, not necessarily GUIDs.
+    $encodedId = [uri]::EscapeDataString($assignmentId)
+    $assignmentUri = "$uri/$encodedId"
 
     try {
       Invoke-AFNativeGraphRequest `
         -Method DELETE `
-        -Uri "$uri/$assignmentId" | Out-Null
+        -Uri $assignmentUri |
+      Out-Null
     }
     catch {
       $status = [int]$_.Exception.Data["HttpStatus"]
@@ -51,11 +67,12 @@ function Remove-AFIntuneAppAssignments {
         throw
       }
 
-      # Verify an ambiguous deletion response.
+      # Reconcile an ambiguous response without repeating deletion.
       try {
         Invoke-AFNativeGraphRequest `
           -Method GET `
-          -Uri "$uri/$assignmentId" | Out-Null
+          -Uri $assignmentUri |
+        Out-Null
       }
       catch {
         if ([int]$_.Exception.Data["HttpStatus"] -eq 404) {

@@ -1,7 +1,8 @@
 function ConvertTo-AFNativeAssignmentBody {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory)]$Assignment
+    [Parameter(Mandatory)]
+    $Assignment
   )
 
   Get-AFClientAssignmentKey -Assignment $Assignment | Out-Null
@@ -60,8 +61,6 @@ function ConvertTo-AFNativeAssignmentBody {
     $filterId = $parsedFilterId.ToString()
   }
 
-  # An unfiltered assignment must serialize the ID as JSON null,
-  # rather than an empty string.
   $target.deviceAndAppManagementAssignmentFilterId = $filterId
   $target.deviceAndAppManagementAssignmentFilterType = $filterType
 
@@ -103,6 +102,17 @@ function ConvertTo-AFNativeAssignmentBody {
       if ($name -in @("@odata.context", "@odata.etag")) {
         $settings.Remove($name)
       }
+      elseif ($name -eq "inUseSettings") {
+        if ($null -ne $settings[$name]) {
+          throw (
+            "Win32 assignment contains populated inUseSettings. " +
+            "Inspect its schema before copying or updating it."
+          )
+        }
+
+        # Observed in Graph responses as null. Omit it from writes.
+        $settings.Remove($name)
+      }
       elseif ($name -notin $allowedSettings) {
         throw (
           "Unrecognized Win32 assignment setting '$name'. " +
@@ -112,7 +122,6 @@ function ConvertTo-AFNativeAssignmentBody {
     }
   }
 
-  # Exclude assignment IDs and source metadata from the payload.
   [PSCustomObject]@{
     "@odata.type" = "#microsoft.graph.mobileAppAssignment"
     intent        = [string]$Assignment.intent

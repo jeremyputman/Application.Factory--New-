@@ -1,8 +1,20 @@
 function Publish-AFApplicationClientApp {
-  [CmdletBinding()]
-  param(
-    [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration
-  )
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateNotNullOrEmpty()][PSCustomObject]$configuration,
+        [switch]$UseNativeUpload,
+        [ValidateSet("Auto", "Native", "AzCopy")][string]$UploadTransport = "Auto",
+        [string]$AzCopyPath
+    )
+
+    if ($UseNativeUpload) {
+        Publish-AFApplicationClientAppNative `
+            -Configuration $configuration `
+            -UploadTransport $UploadTransport `
+            -AzCopyPath $AzCopyPath | Out-Null
+
+        return
+    }
   # Construct table for supported operating systems
     $ArchitectureTable = @{
     "x64" = "x64"

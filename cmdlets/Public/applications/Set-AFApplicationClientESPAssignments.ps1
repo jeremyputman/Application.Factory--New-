@@ -1,31 +1,67 @@
 function Set-AFApplicationClientESPAssignments {
-  [cmdletbinding()]
+  [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][PSCustomObject]$configuration    
+    [Parameter(Mandatory)][PSCustomObject]$configuration
   )
-  $graph_header = @{
-    "content-type"  = "application/json"
-    "Authorization" = "Bearer $($global:AccessToken.AccessToken)"
-  }  
-  $assignments = $configuration.esp_assignments -split ","
-  foreach ($assignment in $assignments) {
-    $uri = "https://graph.microsoft.com/beta/deviceManagement/deviceEnrollmentConfigurations?`$filter=displayName eq '$($assignment)'"
-    $esp = (Invoke-RestMethod -Method Get -Uri $uri -Headers $graph_header -StatusCodeVariable statusCode).value
-    if ($esp) {
-      $current = @()
-      if ($esp.selectedMobileAppIds) {
-        $current = @($esp.selectedMobileAppIds)
-        $new = @($current + $script:published_application.id | Select-Object -Unique)
-        $body = @{
-          "@odata.type"              = "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
-          "showInstallationProgress" = $true
-          "selectedMobileAppIds"     = $new
-        } | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Method Patch -Uri "https://graph.microsoft.com/beta/deviceManagement/deviceEnrollmentConfigurations/$($esp.id)" -Headers $graph_header -Body $body | Out-Null
-      }      
+
+  $appId = [string]$script:published_application.id
+
+  if ([string]::IsNullOrWhiteSpace($appId)) {
+    throw "A published application ID is required for ESP assignments."
+  }
+
+  $names = @(
+    [string]$configuration.esp_assignments -split "," |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ } |
+    Select-Object -Unique
+  )
+
+  foreach ($name in $names) {
+    $esp = Get-AFClientUniqueGraphObject `
+      -Resource "deviceManagement/deviceEnrollmentConfigurations" `
+      -DisplayName $name
+
+    if (
+      $esp.'@odata.type' -ne
+      "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
+    ) {
+      throw "'$name' is not a Windows ESP configuration."
     }
 
-  }
-  
+    $current = @(
+      $esp.selectedMobileAppIds | Where-Object { $_ }
+    )
 
+    if ($appId -notin $current) {
+      $newIds = @(
+        @($current) + @($appId) |
+        Select-Object -Unique
+      )
+
+      Invoke-AFNativeGraphRequest `
+        -Method PATCH `
+        -Uri (
+        "deviceManagement/deviceEnrollmentConfigurations/" +
+        $esp.id
+      ) `
+        -Body @{
+        "@odata.type"            =
+        "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
+        showInstallationProgress = $true
+        selectedMobileAppIds     = $newIds
+      } | Out-Null
+    }
+
+    $confirmed = Invoke-AFNativeGraphRequest `
+      -Method GET `
+      -Uri (
+      "deviceManagement/deviceEnrollmentConfigurations/" +
+      $esp.id
+    )
+
+    if ($appId -notin @($confirmed.selectedMobileAppIds)) {
+      throw "ESP '$name' did not retain application $appId."
+    }
+  }
 }

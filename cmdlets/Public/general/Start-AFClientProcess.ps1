@@ -425,12 +425,36 @@ function Start-AFClientProcess {
 
           $publicationStarted = $true
 
-          Publish-AFApplicationClientApp `
-            -configuration $configuration `
-            -UseNativeUpload:$UseNativeUpload `
-            -UploadTransport $UploadTransport `
-            -AzCopyPath $AzCopyPath `
-            -ErrorAction Stop
+          $previousCheckpoint = Get-Variable `
+            -Name af_native_publication_journal `
+            -Scope Script `
+            -ErrorAction SilentlyContinue
+
+          $script:af_native_publication_journal = @{
+            Enabled = [bool]$UseNativeUpload
+            Path    = $journalPath
+            Journal = $journal
+          }
+
+          try {
+            Publish-AFApplicationClientApp `
+              -configuration $configuration `
+              -UseNativeUpload:$UseNativeUpload `
+              -UploadTransport $UploadTransport `
+              -AzCopyPath $AzCopyPath `
+              -ErrorAction Stop
+          }
+          finally {
+            if ($null -ne $previousCheckpoint) {
+              $script:af_native_publication_journal = $previousCheckpoint.Value
+            }
+            else {
+              Remove-Variable `
+                -Name af_native_publication_journal `
+                -Scope Script `
+                -ErrorAction SilentlyContinue
+            }
+          }
 
           if (-not $script:published_application.id) {
             throw "The publisher did not return an application ID."

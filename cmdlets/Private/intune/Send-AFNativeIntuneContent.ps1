@@ -9,9 +9,9 @@ function Send-AFNativeIntuneContent {
     [Parameter(Mandatory)][string]$DiagnosticsDirectory
   )
 
-  $length = (Get-Item -LiteralPath $PayloadPath).Length
+  $length = (Get-Item -LiteralPath $PayloadPath -ErrorAction Stop).Length
 
-  if (-not $AzCopyPath) {
+  if (-not $AzCopyPath -and $Transport -ne "Native") {
     $command = Get-Command azcopy.exe `
       -CommandType Application `
       -ErrorAction SilentlyContinue |
@@ -22,23 +22,33 @@ function Send-AFNativeIntuneContent {
     }
   }
 
+  $azCopyAvailable = (
+    -not [string]::IsNullOrWhiteSpace($AzCopyPath) -and
+    (Test-Path -LiteralPath $AzCopyPath -PathType Leaf)
+  )
+
+  if ($Transport -eq "AzCopy" -and -not $azCopyAvailable) {
+    throw "AzCopy was requested but its executable was not found."
+  }
+
   $tryAzCopy = (
     $Transport -eq "AzCopy" -or
     (
       $Transport -eq "Auto" -and
       $length -ge $AzCopyThresholdBytes -and
-      $AzCopyPath
+      $azCopyAvailable
     )
   )
 
-  if ($tryAzCopy) {
-    if (
-      -not $AzCopyPath -or
-      -not (Test-Path -LiteralPath $AzCopyPath -PathType Leaf)
-    ) {
-      throw "AzCopy was requested but its executable was not found."
-    }
+  if (
+    $Transport -eq "Auto" -and
+    $length -ge $AzCopyThresholdBytes -and
+    -not $azCopyAvailable
+  ) {
+    Write-Verbose "AzCopy is unavailable; Auto selected native upload."
+  }
 
+  if ($tryAzCopy) {
     $complete = Invoke-AFNativeAzCopy `
       -Context $Context `
       -PayloadPath $PayloadPath `
@@ -49,9 +59,8 @@ function Send-AFNativeIntuneContent {
       return
     }
 
-    # Invoke-AFNativeAzCopy ensures its process has stopped.
-    # Reset this uncommitted blob before using native block IDs.
-    # The storage helper renews only when needed.
+    # AzCopy has stopped. Clear its partial upload before
+    # starting a fresh native block sequence.
     Invoke-AFNativeStoragePut `
       -Context $Context `
       -Bytes ([byte[]]::new(0)) `

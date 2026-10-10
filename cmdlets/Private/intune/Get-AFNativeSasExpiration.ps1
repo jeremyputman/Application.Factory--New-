@@ -1,6 +1,8 @@
 function Get-AFNativeSasExpiration {
   [CmdletBinding()]
-  param([Parameter(Mandatory)]$File)
+  param(
+    [Parameter(Mandatory)]$File
+  )
 
   $uri = [uri]$File.azureStorageUri
 
@@ -9,24 +11,50 @@ function Get-AFNativeSasExpiration {
   }
 
   $expirations = [Collections.Generic.List[DateTimeOffset]]::new()
+  $culture = [Globalization.CultureInfo]::InvariantCulture
+  $styles = [Globalization.DateTimeStyles]::AssumeUniversal
 
-  if ($File.azureStorageUriExpirationDateTime) {
-    $expirations.Add(
-      [DateTimeOffset]::Parse(
-        [string]$File.azureStorageUriExpirationDateTime
+  $graphExpiry = $File.azureStorageUriExpirationDateTime
+
+  if ($null -ne $graphExpiry -and "$graphExpiry" -ne "") {
+    if ($graphExpiry -is [DateTimeOffset]) {
+      $parsed = $graphExpiry
+    }
+    elseif ($graphExpiry -is [DateTime]) {
+      $date = $graphExpiry
+
+      if ($date.Kind -eq [DateTimeKind]::Unspecified) {
+        $date = [DateTime]::SpecifyKind(
+          $date,
+          [DateTimeKind]::Utc
+        )
+      }
+
+      # Preserve the DateTime's UTC/local information.
+      $parsed = [DateTimeOffset]::new($date)
+    }
+    else {
+      $parsed = [DateTimeOffset]::Parse(
+        [string]$graphExpiry,
+        $culture,
+        $styles
       )
-    )
+    }
+
+    $expirations.Add($parsed.ToUniversalTime())
   }
 
   foreach ($part in $uri.Query.TrimStart('?').Split('&')) {
     $pair = $part.Split('=', 2)
 
     if ($pair.Count -eq 2 -and $pair[0] -ieq "se") {
-      $expirations.Add(
-        [DateTimeOffset]::Parse(
-          [uri]::UnescapeDataString($pair[1])
-        )
+      $parsed = [DateTimeOffset]::Parse(
+        [uri]::UnescapeDataString($pair[1]),
+        $culture,
+        $styles
       )
+
+      $expirations.Add($parsed.ToUniversalTime())
     }
   }
 
@@ -34,6 +62,6 @@ function Get-AFNativeSasExpiration {
     throw "Intune SAS URI does not provide a usable expiration."
   }
 
-  # Use the earlier expiration if the URI and Graph property differ.
+  # Honor the earlier expiry supplied by Graph or the signed URL.
   return ($expirations | Sort-Object | Select-Object -First 1)
 }

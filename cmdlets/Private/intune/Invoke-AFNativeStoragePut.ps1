@@ -2,10 +2,55 @@ function Invoke-AFNativeStoragePut {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory)][hashtable]$Context,
-    [Parameter(Mandatory)][string]$Query,
-    [Parameter(Mandatory)][byte[]]$Bytes,
-    [string]$ContentType = "application/octet-stream"
+    [AllowEmptyString()][string]$Query = "",
+    [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes,
+    [string]$ContentType = "application/octet-stream",
+    [switch]$InitializeBlob
   )
+
+  if ($InitializeBlob) {
+    if ($Query -or $Bytes.Length -ne 0) {
+      throw "Blob initialization requires no operation query and an empty body."
+    }
+
+    # Never reset a file that Intune has already committed.
+    $latest = Invoke-AFNativeGraphRequest `
+      -Method GET `
+      -Uri $Context.FileUri
+
+    if (
+      $latest.isCommitted -eq $true -or
+      $latest.uploadState -in @(
+        "commitFilePending",
+        "commitFileSuccess"
+      )
+    ) {
+      throw "Refusing to reset committed or committing content."
+    }
+
+    $oldResource = ([uri]$Context.File.azureStorageUri).GetLeftPart(
+      [UriPartial]::Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace(
+        [string]$latest.azureStorageUri
+      )) {
+      throw "The content file has no Azure upload URI."
+    }
+
+    $newResource = ([uri]$latest.azureStorageUri).GetLeftPart(
+      [UriPartial]::Path
+    )
+
+    if ($newResource -cne $oldResource) {
+      throw "The destination blob changed; initialization stopped."
+    }
+
+    $Context.File = $latest
+  }
+  elseif ([string]::IsNullOrWhiteSpace($Query)) {
+    throw "A block or block-list operation query is required."
+  }
 
   $md5 = [Security.Cryptography.MD5]::Create()
 
@@ -21,10 +66,32 @@ function Invoke-AFNativeStoragePut {
   $clientRequestId = [guid]::NewGuid().ToString()
   $renewedAfter403 = $false
 
+  $operation = if ($InitializeBlob) {
+    "InitializeBlob"
+  }
+  else {
+    $Query
+  }
+
   for ($attempt = 1; $attempt -le 6; $attempt++) {
     Update-AFNativeUploadSas -Context $Context
 
-    $uri = "$($Context.File.azureStorageUri)&$Query"
+    $uri = [string]$Context.File.azureStorageUri
+
+    if ($Query) {
+      $uri += "&$Query"
+    }
+
+    $headers = @{
+      "x-ms-version"           = "2021-12-02"
+      "x-ms-date"              = [DateTime]::UtcNow.ToString("R")
+      "Content-MD5"            = $contentMd5
+      "x-ms-client-request-id" = $clientRequestId
+    }
+
+    if ($InitializeBlob) {
+      $headers["x-ms-blob-type"] = "BlockBlob"
+    }
 
     try {
       Invoke-WebRequest `
@@ -33,13 +100,9 @@ function Invoke-AFNativeStoragePut {
         -Body $Bytes `
         -ContentType $ContentType `
         -TimeoutSec 120 `
-        -Headers @{
-        "x-ms-version"           = "2021-12-02"
-        "x-ms-date"              = [DateTime]::UtcNow.ToString("R")
-        "Content-MD5"            = $contentMd5
-        "x-ms-client-request-id" = $clientRequestId
-      } `
-        -ErrorAction Stop | Out-Null
+        -Headers $headers `
+        -ErrorAction Stop |
+      Out-Null
 
       return
     }
@@ -52,7 +115,11 @@ function Invoke-AFNativeStoragePut {
         $attempt -lt 6
       ) {
         $renewedAfter403 = $true
-        Update-AFNativeUploadSas -Context $Context -Force
+
+        Update-AFNativeUploadSas `
+          -Context $Context `
+          -Force
+
         continue
       }
 
@@ -74,12 +141,14 @@ function Invoke-AFNativeStoragePut {
         }
       }
 
+      $detail = Protect-AFNativeDiagnostic -Text $failure.Detail
+
       throw (
         "Azure content PUT failed. " +
-        "Operation=$Query; HTTP=$($failure.Status); " +
+        "Operation=$operation; HTTP=$($failure.Status); " +
         "RequestId=$($failure.RequestId); " +
         "ClientRequestId=$clientRequestId; " +
-        "Response=$($failure.Detail)"
+        "Response=$detail"
       )
     }
   }

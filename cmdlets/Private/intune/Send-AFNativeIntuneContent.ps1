@@ -32,9 +32,10 @@ function Send-AFNativeIntuneContent {
   )
 
   if ($tryAzCopy) {
-    if (-not $AzCopyPath -or -not (
-        Test-Path -LiteralPath $AzCopyPath -PathType Leaf
-      )) {
+    if (
+      -not $AzCopyPath -or
+      -not (Test-Path -LiteralPath $AzCopyPath -PathType Leaf)
+    ) {
       throw "AzCopy was requested but its executable was not found."
     }
 
@@ -48,9 +49,15 @@ function Send-AFNativeIntuneContent {
       return
     }
 
-    # Start a fresh native block set against the same blob.
-    # Its final block list excludes any partial AzCopy blocks.
-    Update-AFNativeUploadSas -Context $Context -Force
+    # Invoke-AFNativeAzCopy ensures its process has stopped.
+    # Reset this uncommitted blob before using native block IDs.
+    # The storage helper renews only when needed.
+    Invoke-AFNativeStoragePut `
+      -Context $Context `
+      -Bytes ([byte[]]::new(0)) `
+      -InitializeBlob
+
+    Write-Verbose "Partial Azure upload cleared; starting native fallback."
   }
 
   Send-AFNativeAzureBlocks `

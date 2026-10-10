@@ -9,10 +9,32 @@ function Update-AFNativeUploadSas {
         throw "Native content upload exceeded its overall timeout."
     }
 
+    $state = [string]$Context.File.uploadState
+
+    if ($state -in @(
+            "azureStorageUriRequestFailed",
+            "azureStorageUriRequestTimedOut",
+            "azureStorageUriRenewalFailed",
+            "azureStorageUriRenewalTimedOut",
+            "error"
+        )) {
+        throw (
+            "Content file has failed SAS state '$state'. " +
+            "Do not continue uploading or retry renewal against this file. " +
+            "Inspect it and recover through a fresh content version."
+        )
+    }
+
     $expiration = Get-AFNativeSasExpiration -File $Context.File
+
+    $successfulState = $state -in @(
+        "azureStorageUriRequestSuccess",
+        "azureStorageUriRenewalSuccess"
+    )
 
     if (
         -not $Force -and
+        $successfulState -and
         $expiration -gt [DateTimeOffset]::UtcNow.AddMinutes(3)
     ) {
         return
@@ -24,28 +46,50 @@ function Update-AFNativeUploadSas {
 
     $oldSas = [string]$Context.File.azureStorageUri
     $oldResource = ([uri]$oldSas).GetLeftPart([UriPartial]::Path)
-    $Context.Renewals++
 
-    try {
-        Invoke-AFNativeGraphRequest `
-            -Method POST `
-            -Uri "$($Context.FileUri)/renewUpload" | Out-Null
-    }
-    catch {
-        $status = [int]$_.Exception.Data["HttpStatus"]
-
-        # An ambiguous response may still have initiated renewal.
-        if ($status -notin @(0, 408, 500, 502, 503, 504)) {
-            throw
+    if ($state -in @(
+            "azureStorageUriRequestPending",
+            "azureStorageUriRenewalPending"
+        )) {
+        $stage = if ($state -eq "azureStorageUriRequestPending") {
+            "AzureStorageUriRequest"
+        }
+        else {
+            "AzureStorageUriRenewal"
         }
 
-        Write-Verbose "Renewal response was ambiguous; checking file state."
+        $renewed = Wait-AFNativeContentFile `
+            -FileUri $Context.FileUri `
+            -Stage $stage
     }
+    else {
+        if (-not $successfulState) {
+            throw "Cannot renew content in unexpected state '$state'."
+        }
 
-    $renewed = Wait-AFNativeContentFile `
-        -FileUri $Context.FileUri `
-        -Stage AzureStorageUriRenewal `
-        -PreviousSasUri $oldSas
+        $Context.Renewals++
+
+        try {
+            Invoke-AFNativeGraphRequest `
+                -Method POST `
+                -Uri "$($Context.FileUri)/renewUpload" |
+            Out-Null
+        }
+        catch {
+            $status = [int]$_.Exception.Data["HttpStatus"]
+
+            if ($status -notin @(0, 408, 500, 502, 503, 504)) {
+                throw
+            }
+
+            Write-Verbose "Renewal response was ambiguous; checking file state."
+        }
+
+        $renewed = Wait-AFNativeContentFile `
+            -FileUri $Context.FileUri `
+            -Stage AzureStorageUriRenewal `
+            -PreviousSasUri $oldSas
+    }
 
     $newResource = ([uri]$renewed.azureStorageUri).GetLeftPart(
         [UriPartial]::Path

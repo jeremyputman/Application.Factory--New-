@@ -9,7 +9,7 @@ function Start-AFClientProcess {
     [switch]$Force,
     [switch]$DownloadOnly,
 
-    [switch]$UseNativeUpload,
+    [switch]$UseNativeUpload = $true,
     [ValidateSet("Auto", "Native", "AzCopy")][string]$UploadTransport = "Auto",
     [string]$AzCopyPath,
 
@@ -18,6 +18,20 @@ function Start-AFClientProcess {
   )
 
   $ErrorActionPreference = "Stop"
+
+  if (-not $UseNativeUpload) {
+    throw (
+      "The legacy IntuneWin32App publishing route has been retired. " +
+      "Omit UseNativeUpload or specify -UseNativeUpload."
+    )
+  }
+
+  if (
+    $PSVersionTable.PSVersion.Major -lt 7 -or
+    -not $IsWindows
+  ) {
+    throw "Client publishing requires PowerShell 7 on Windows."
+  }  
 
   if (
     $ResumePublishedAppId -and
@@ -406,14 +420,6 @@ function Start-AFClientProcess {
             }
           }
 
-          if (-not $UseNativeUpload) {
-            Connect-MSIntuneGraph `
-              -TenantID $script:appregistration_tenant `
-              -ClientID $script:appregistration_client `
-              -ClientSecret $script:appregistration_secret |
-            Out-Null
-          }
-
           $stage = "Publish"
           $journal.State = "PublishStarted"
           $journal.Stage = $stage
@@ -581,13 +587,20 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        $results.Add([PSCustomObject]@{
-            Application = $appName
-            Version     = $version
-            State       = "Complete"
-            AppId       = [string]$journal.AppId
-            JournalPath = $journalPath
-          })
+        try {
+          Remove-AFClientCompletedWork `
+            -Configuration $configuration `
+            -Journal $journal `
+            -ErrorAction Stop
+        }
+        catch {
+          # Publication and client processing already succeeded.
+          # A local cleanup failure must not turn that into a failed publish.
+          Write-Warning (
+            "Application processing completed, but local cleanup failed. " +
+            (Protect-AFNativeDiagnostic -Text $_.Exception.Message)
+          ) -WarningAction Continue
+        }
 
         Write-AFLogEntry `
           -Message "[$appName] :: Client process completed for version $version." `

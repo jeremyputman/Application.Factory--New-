@@ -1,20 +1,14 @@
 function Publish-AFApplicationClientAppNative {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory)]
-    [ValidateNotNullOrEmpty()]
-    [PSCustomObject]$Configuration,
-
-    [ValidateSet("Auto", "Native", "AzCopy")]
-    [string]$UploadTransport = "Auto",
-
+    [Parameter(Mandatory)][ValidateNotNullOrEmpty()][PSCustomObject]$Configuration,
+    [ValidateSet("Auto", "Native", "AzCopy")][string]$UploadTransport = "Auto",
     [string]$AzCopyPath,
-
-    [ValidateRange(300, 86400)]
-    [int]$UploadTimeoutSeconds = 21600,
-
-    [ValidateRange(30, 3600)]
-    [int]$ProcessingTimeoutSeconds = 900
+    [ValidateRange(300, 86400)][int]$UploadTimeoutSeconds = 21600,
+    [ValidateRange(30, 3600)][int]$ProcessingTimeoutSeconds = 900,
+    [string]$ExistingAppId,
+    [string]$ExpectedDisplayVersion,
+    [string]$ExpectedContentVersion
   )
 
   if (
@@ -55,6 +49,7 @@ function Publish-AFApplicationClientAppNative {
   $diagnosticsDirectory = Join-Path $workDirectory "AzCopy"
 
   $status = [ordered]@{
+    Operation        = if ($ExistingAppId) { "ReplaceInPlace" } else { "Create" }
     ApplicationName  = [string]$application.Name
     AppFactoryId     = [string]$application.id
     AppId            = ""
@@ -86,7 +81,7 @@ function Publish-AFApplicationClientAppNative {
       x64   = "x64"
       arm64 = "arm64"
 
-      # Preserve the existing meaning of All: Intel architectures.
+      # All supports x86, x64, and ARM64.
       All   = "x86,x64,arm64"
     }
 
@@ -298,19 +293,61 @@ function Publish-AFApplicationClientAppNative {
     # Avoid reusing a token cached for a previous client's credentials.
     Connect-AFIntuneGraph -Force
 
-    $status.Stage = "CreateApplication"
+    if ($ExistingAppId) {
+      if (
+        [string]::IsNullOrWhiteSpace($ExpectedDisplayVersion) -or
+        [string]::IsNullOrWhiteSpace($ExpectedContentVersion)
+      ) {
+        throw "Replacement requires the expected existing version and content version."
+      }
+      # Clear supported optional metadata when the new App.json omits it.
+      foreach ($name in @("minimumMemoryInMB", "minimumFreeDiskSpaceInMB")) {
+        if (-not $body.ContainsKey($name)) { $body[$name] = 0 }
+      }
+      foreach ($name in @("informationUrl", "privacyInformationUrl", "owner")) {
+        if (-not $body.ContainsKey($name)) { $body[$name] = "" }
+      }
 
-    $app = Invoke-AFNativeGraphRequest `
-      -Method POST `
-      -Uri "deviceAppManagement/mobileApps" `
-      -Body $body
+      $checkpoint = Get-Variable -Name af_native_publication_journal -Scope Script -ErrorAction SilentlyContinue
+      if ($null -ne $checkpoint -and $checkpoint.Value.Enabled) {
+        $checkpoint.Value.Journal.ExpectedDetectionRules = @($detectionRules)
+        $checkpoint.Value.Journal.ExpectedArchitectures = [string]$architecture
+      }
 
-    if (-not $app.id) {
-      throw "Graph did not return an application ID."
+      $status.Stage = "ValidateReplacementTarget"
+      $status.AppId = [string]([guid]$ExistingAppId)
+      Save-AFNativePublishCheckpoint -Status $status
+
+      $app = Get-AFNativeManagedApp `
+        -Id ([guid]$ExistingAppId) `
+        -ApplicationId ([string]$application.id) `
+        -Version $ExpectedDisplayVersion
+      if ($null -eq $app) {
+        throw "The replacement target no longer exists; no new app will be created."
+      }
+      if ([string]$app.committedContentVersion -cne $ExpectedContentVersion) {
+        throw "The replacement target's active content changed; upload stopped."
+      }
+      # Get-AFNativeManagedApp already validated the exact ownership marker,
+      # application type, expected version, and publication readiness.
+      # DisplayName does not determine identity.
+      if ($app.activeInstallScript -or $app.activeUninstallScript) {
+        throw "Replacing an app with active Intune install/uninstall script references is not supported."
+      }
+    }
+    else {
+      $status.Stage = "CreateApplication"
+      $app = Invoke-AFNativeGraphRequest `
+        -Method POST `
+        -Uri "deviceAppManagement/mobileApps" `
+        -Body $body
+      if (-not $app.id) {
+        throw "Graph did not return an application ID."
+      }
+      $status.AppId = [string]$app.id
+      Save-AFNativePublishCheckpoint -Status $status
     }
 
-    $status.AppId = [string]$app.id
-    Save-AFNativePublishCheckpoint -Status $status
     $appUri = "deviceAppManagement/mobileApps/$($app.id)"
     $contentRoot = "$appUri/microsoft.graph.win32LobApp/contentVersions"
 
@@ -428,14 +465,45 @@ function Publish-AFApplicationClientAppNative {
     }
 
     $status.Stage = "ActivateContentVersion"
+    $activationBody = @{
+      "@odata.type"           = "#microsoft.graph.win32LobApp"
+      committedContentVersion = [string]$version.id
+    }
 
+    if ($ExistingAppId) {
+      # Recheck ownership, version, and active content before activation.
+      $currentApp = Invoke-AFNativeGraphRequest `
+        -Method GET `
+        -Uri $appUri
+
+      $marker = (
+        '(?im)^\s*AppFactoryID:' +
+        [regex]::Escape([string]$application.id) +
+        '\s*$'
+      )
+
+      if (
+        $currentApp.'@odata.type' -ne "#microsoft.graph.win32LobApp" -or
+        [string]$currentApp.notes -notmatch $marker -or
+        [string]$currentApp.displayVersion -cne $ExpectedDisplayVersion -or
+        [string]$currentApp.committedContentVersion -cne $ExpectedContentVersion
+      ) {
+        throw (
+          "The replacement target changed before activation; " +
+          "no activation PATCH was sent."
+        )
+      }
+
+      # Activate the committed content and its matching metadata together.
+      $activationBody = @{} + $body
+      $activationBody.committedContentVersion = [string]$version.id
+    }
+
+    Save-AFNativePublishCheckpoint -Status $status
     Invoke-AFNativeGraphRequest `
       -Method PATCH `
       -Uri $appUri `
-      -Body @{
-      "@odata.type"           = "#microsoft.graph.win32LobApp"
-      committedContentVersion = [string]$version.id
-    } | Out-Null
+      -Body $activationBody | Out-Null
 
     $status.Stage = "WaitForPublishing"
     $publishDeadline = [DateTimeOffset]::UtcNow.AddSeconds(
@@ -453,7 +521,8 @@ function Publish-AFApplicationClientAppNative {
         [string]$lastApp.committedContentVersion -eq
         [string]$version.id -and
         [int]$lastApp.uploadState -eq 1 -and
-        $lastApp.publishingState -eq "published"
+        $lastApp.publishingState -eq "published" -and
+        [string]$lastApp.displayVersion -ceq [string]$script:published_version
       ) {
 
         $expectedArchitectures = @(
@@ -489,6 +558,12 @@ function Publish-AFApplicationClientAppNative {
           "Verified allowed device architectures: " +
           ($actualArchitectures -join ',')
         )
+
+        if (-not (Test-AFNativeDetectionRulesMatch `
+              -ExpectedRules $detectionRules `
+              -ActualRules @($lastApp.detectionRules))) {
+          throw "Published detection rules do not match the downloaded package metadata."
+        }
 
         $status.Stage = "Complete"
         $script:published_application = $lastApp

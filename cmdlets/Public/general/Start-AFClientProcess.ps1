@@ -133,7 +133,10 @@ function Start-AFClientProcess {
       $appId = [string]$application.id
       $appName = [string]$application.Name
 
-      $version = if (
+      $version = if ($configuration.versions.raw_version) {
+        [string]$configuration.versions.raw_version
+      }
+      elseif (
         $application.latest_version.raw_version
       ) {
         [string]$application.latest_version.raw_version
@@ -150,6 +153,10 @@ function Start-AFClientProcess {
       $journalPath = ""
       $publicationStarted = $false
       $stage = "Preflight"
+      $replaceInPlace = $false
+      $inPlaceOperation = $false
+      $replacementTarget = $null
+      $assignmentSnapshot = @()
 
       try {
         if (
@@ -158,6 +165,14 @@ function Start-AFClientProcess {
           [string]::IsNullOrWhiteSpace($version)
         ) {
           throw "Application ID, name, and version are required."
+        }
+
+        $modeProperty = $configuration.PSObject.Properties["replace_in_place"]
+        if ($null -ne $modeProperty -and $null -ne $modeProperty.Value) {
+          if ($modeProperty.Value -isnot [bool]) {
+            throw "replace_in_place must be a JSON boolean."
+          }
+          $replaceInPlace = [bool]$modeProperty.Value
         }
 
         if ($DownloadOnly) {
@@ -225,6 +240,84 @@ function Start-AFClientProcess {
           Sort-Object createdDateTime -Descending
         )
 
+        # Replacement identity comes from the exact AppFactoryID Notes marker.
+        # Display names and naming prefixes do not determine application identity.
+
+        # Check all version journals for the exact client/tenant/prefix/app.
+        foreach ($stateFile in @(
+            Get-ChildItem -LiteralPath (
+              [IO.Path]::GetDirectoryName($journalPath)
+            ) -Filter "*.json" -File -ErrorAction Stop
+          )) {
+          $saved = Get-Content -LiteralPath $stateFile.FullName -Raw |
+          ConvertFrom-Json -ErrorAction Stop
+          if (
+            [string]$saved.ApplicationId -ne $appId -or
+            [string]$saved.TenantId -ne [string]$script:appregistration_tenant -or
+            [string]$saved.ClientId -ne [string]$script:client_id
+          ) { continue }
+
+          $expectedPath = Get-AFClientProcessJournalPath `
+            -ApplicationId $appId `
+            -Version ([string]$saved.Version)
+          if ($stateFile.FullName -ne $expectedPath) { continue }
+          if ($saved.State -eq "Complete") { continue }
+          if (
+            $ResumePublishedAppId -and
+            $stateFile.FullName -eq $journalPath -and
+            [string]$saved.AppId -eq $ResumePublishedAppId
+          ) { continue }
+
+          throw (
+            "An unfinished attempt already exists. " +
+            "Operation=$($saved.Operation); Version=$($saved.Version); " +
+            "AppId=$($saved.AppId); Journal=$($stateFile.FullName). " +
+            "Inspect the saved attempt before publishing again. " +
+            "For an in-place replacement, preserve the existing application."
+          )
+        }
+
+        if ($ResumePublishedAppId) {
+          $inPlaceOperation = (
+            $null -ne $existingJournal -and
+            $existingJournal.Operation -eq "ReplaceInPlace"
+          )
+          if ($inPlaceOperation) {
+            if ($null -eq $existingJournal.PSObject.Properties["AssignmentSnapshot"]) {
+              throw "The replacement journal has no assignment snapshot."
+            }
+            $assignmentSnapshot = @($existingJournal.AssignmentSnapshot)
+          }
+        }
+        elseif ($replaceInPlace) {
+          $replacementTarget = Get-AFClientReplacementTarget `
+            -MatchingApps $matchingApps `
+            -ApplicationId $appId `
+            -ApplicationName $appName
+          if ($null -ne $replacementTarget) {
+            $inPlaceOperation = $true
+            if (
+              [string]$replacementTarget.displayVersion -ceq $version -and
+              -not $Force
+            ) {
+              $results.Add([PSCustomObject]@{
+                  Application = $appName
+                  Version     = $version
+                  State       = "AlreadyPublished"
+                  AppId       = [string]$replacementTarget.id
+                  JournalPath = $journalPath
+                })
+              continue
+            }
+            $assignmentSnapshot = @(
+              Get-AFClientGraphCollection -Uri (
+                "deviceAppManagement/mobileApps/" +
+                "$($replacementTarget.id)/assignments"
+              )
+            )
+          }
+        }
+
         $sameVersion = @(
           $matchingApps | Where-Object {
             [string]$_.displayVersion -ceq $version
@@ -255,7 +348,7 @@ function Start-AFClientProcess {
             )
           }
 
-          if ($readySameVersion.Count -gt 0 -and -not $Force) {
+          if (-not $inPlaceOperation -and $readySameVersion.Count -gt 0 -and -not $Force) {
             $results.Add([PSCustomObject]@{
                 Application = $appName
                 Version     = $version
@@ -280,7 +373,7 @@ function Start-AFClientProcess {
 
         $keepPrevious = 0
 
-        if (-not $SkipPreviousVersionCleanup) {
+        if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace -and -not $inPlaceOperation) {
           $rawKeep = [string]$configuration.keep_previous_versions
 
           if (
@@ -291,28 +384,32 @@ function Start-AFClientProcess {
           }
         }
 
-        # Validate expected targets and filters before app creation.
-        $plan = Get-AFClientAssignmentPlan `
-          -Configuration $configuration `
-          -PreviousApps $previousApps
+        $plan = $null
+        if (-not $inPlaceOperation) {
+          # Validate expected targets and filters before app creation.
+          $plan = Get-AFClientAssignmentPlan `
+            -Configuration $configuration `
+            -PreviousApps $previousApps
 
-        # Validate ESP names before app creation too.
-        foreach ($espName in @(
-            [string]$configuration.esp_assignments -split "," |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_ } |
-            Select-Object -Unique
-          )) {
-          $esp = Get-AFClientUniqueGraphObject `
-            -Resource "deviceManagement/deviceEnrollmentConfigurations" `
-            -DisplayName $espName
+          # Validate ESP names before app creation too.
+          foreach ($espName in @(
+              [string]$configuration.esp_assignments -split "," |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ } |
+              Select-Object -Unique
+            )) {
+            $esp = Get-AFClientUniqueGraphObject `
+              -Resource "deviceManagement/deviceEnrollmentConfigurations" `
+              -DisplayName $espName
 
-          if (
-            $esp.'@odata.type' -ne
-            "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
-          ) {
-            throw "'$espName' is not a Windows ESP configuration."
+            if (
+              $esp.'@odata.type' -ne
+              "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
+            ) {
+              throw "'$espName' is not a Windows ESP configuration."
+            }
           }
+
         }
 
         if (
@@ -327,23 +424,42 @@ function Start-AFClientProcess {
         }
 
         $journal = [ordered]@{
-          ApplicationId    = $appId
-          ApplicationName  = $appName
-          Version          = $version
-          TenantId         = [string]$script:appregistration_tenant
-          ClientId         = [string]$script:client_id
-          Publisher        = if ($UseNativeUpload) { "Native" } else { "Legacy" }
-          State            = "Preparing"
-          Stage            = "Preflight"
-          AppId            = ""
-          ContentVersionId = ""
-          FileId           = ""
-          UploadStage      = ""
-          WorkDirectory    = ""
-          Error            = ""
-          PreviousAppIds   = @($previousApps.id)
-          StartedUtc       = [DateTimeOffset]::UtcNow.ToString("o")
-          UpdatedUtc       = ""
+          ApplicationId            = $appId
+          ApplicationName          = $appName
+          Version                  = $version
+          TenantId                 = [string]$script:appregistration_tenant
+          ClientId                 = [string]$script:client_id
+          Publisher                = "Native"
+          Operation                = if ($inPlaceOperation) { "ReplaceInPlace" } else { "Create" }
+          AppPrefix                = [string]$script:app_prefix
+          OriginalDisplayVersion   = if ($replacementTarget) {
+            [string]$replacementTarget.displayVersion
+          }
+          elseif ($inPlaceOperation) {
+            [string]$existingJournal.OriginalDisplayVersion
+          }
+          else { "" }
+          OriginalContentVersionId = if ($replacementTarget) {
+            [string]$replacementTarget.committedContentVersion
+          }
+          elseif ($inPlaceOperation) {
+            [string]$existingJournal.OriginalContentVersionId
+          }
+          else { "" }
+          AssignmentSnapshot       = @($assignmentSnapshot)
+          ExpectedDetectionRules   = @()
+          ExpectedArchitectures    = ""
+          State                    = "Preparing"
+          Stage                    = "Preflight"
+          AppId                    = ""
+          ContentVersionId         = ""
+          FileId                   = ""
+          UploadStage              = ""
+          WorkDirectory            = ""
+          Error                    = ""
+          PreviousAppIds           = @($previousApps.id)
+          StartedUtc               = [DateTimeOffset]::UtcNow.ToString("o")
+          UpdatedUtc               = ""
         }
 
         if ($ResumePublishedAppId) {
@@ -354,6 +470,40 @@ function Start-AFClientProcess {
             -ApplicationId $appId `
             -Version $version `
             -TimeoutSeconds 0
+
+          if ($inPlaceOperation) {
+            if (
+              [string]::IsNullOrWhiteSpace([string]$existingJournal.ContentVersionId) -or
+              [string]$published.committedContentVersion -cne
+              [string]$existingJournal.ContentVersionId
+            ) {
+              throw "Resume requires the exact replacement content version to be active."
+            }
+            if (
+              @($existingJournal.ExpectedDetectionRules).Count -eq 0 -or
+              [string]::IsNullOrWhiteSpace([string]$existingJournal.ExpectedArchitectures) -or
+              -not (Test-AFNativeDetectionRulesMatch -ExpectedRules @($existingJournal.ExpectedDetectionRules) -ActualRules @($published.detectionRules))
+            ) {
+              throw "Resume requires the replacement's saved detection rules to match Graph."
+            }
+            $expectedArchitectures = @(
+              ([string]$existingJournal.ExpectedArchitectures) -split ',' |
+              ForEach-Object { $_.Trim().ToLowerInvariant() } | Sort-Object -Unique
+            )
+            $actualArchitectures = @(
+              ([string]$published.allowedArchitectures) -split ',' |
+              ForEach-Object { $_.Trim().ToLowerInvariant() } | Sort-Object -Unique
+            )
+            if (($actualArchitectures -join ',') -cne ($expectedArchitectures -join ',')) {
+              throw "Resume architecture verification failed."
+            }
+            $journal.ExpectedDetectionRules = @($existingJournal.ExpectedDetectionRules)
+            $journal.ExpectedArchitectures = [string]$existingJournal.ExpectedArchitectures
+            $journal.ContentVersionId = [string]$existingJournal.ContentVersionId
+            $journal.FileId = [string]$existingJournal.FileId
+            $journal.UploadStage = [string]$existingJournal.UploadStage
+            $journal.WorkDirectory = [string]$existingJournal.WorkDirectory
+          }
 
           $script:published_application = $published
           $journal.AppId = [string]$published.id
@@ -420,6 +570,10 @@ function Start-AFClientProcess {
             }
           }
 
+          if ($inPlaceOperation) {
+            $journal.AppId = [string]$replacementTarget.id
+          }
+
           $stage = "Publish"
           $journal.State = "PublishStarted"
           $journal.Stage = $stage
@@ -443,12 +597,21 @@ function Start-AFClientProcess {
           }
 
           try {
-            Publish-AFApplicationClientApp `
-              -configuration $configuration `
-              -UseNativeUpload:$UseNativeUpload `
-              -UploadTransport $UploadTransport `
-              -AzCopyPath $AzCopyPath `
-              -ErrorAction Stop
+            $publishParameters = @{
+              configuration   = $configuration
+              UseNativeUpload = $UseNativeUpload
+              UploadTransport = $UploadTransport
+              AzCopyPath      = $AzCopyPath
+              ErrorAction     = "Stop"
+            }
+            if ($inPlaceOperation) {
+              $publishParameters.ExistingAppId = [string]$replacementTarget.id
+              $publishParameters.ExpectedDisplayVersion =
+              [string]$journal.OriginalDisplayVersion
+              $publishParameters.ExpectedContentVersion =
+              [string]$journal.OriginalContentVersionId
+            }
+            Publish-AFApplicationClientApp @publishParameters
           }
           finally {
             if ($null -ne $previousCheckpoint) {
@@ -504,55 +667,83 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        # Apply the exact native plan captured before publishing.
-        # Graph authentication refreshes through Invoke-AFNativeGraphRequest.
-        $stage = "ApplyAssignments"
-        $journal.Stage = $stage
+        if ($inPlaceOperation) {
+          $stage = "VerifyPreservedAssignments"
+          Assert-AFClientAssignmentsUnchanged `
+            -AppId ([guid]$journal.AppId) `
+            -ExpectedAssignments $assignmentSnapshot
+          Write-Verbose (
+            "In-place replacement: assignment writes, ESP writes, " +
+            "and previous-application cleanup were skipped."
+          )
+        }
+        else {
+          # Apply the exact native plan captured before publishing.
+          # Graph authentication refreshes through Invoke-AFNativeGraphRequest.
+          $stage = "ApplyAssignments"
+          $journal.Stage = $stage
 
-        Save-AFClientProcessJournal `
-          -Path $journalPath `
-          -Journal $journal
+          Save-AFClientProcessJournal `
+            -Path $journalPath `
+            -Journal $journal
 
-        Set-AFApplicationClientGroups `
-          -configuration $configuration `
-          -Plan $plan `
-          -ErrorAction Stop |
-        Out-Null
-
-        $stage = "VerifyAssignments"
-
-        Assert-AFClientAssignments `
-          -AppId $journal.AppId `
-          -Plan $plan
-
-        $stage = "ApplyESP"
-
-        if ($configuration.esp_assignments) {
-          Set-AFApplicationClientESPAssignments `
+          Set-AFApplicationClientGroups `
             -configuration $configuration `
+            -Plan $plan `
             -ErrorAction Stop |
           Out-Null
-        }
 
-        $stage = "PreviousVersionCleanup"
-        $journal.Stage = $stage
+          $stage = "VerifyAssignments"
 
-        Save-AFClientProcessJournal `
-          -Path $journalPath `
-          -Journal $journal
-
-        if (-not $SkipPreviousVersionCleanup) {
-          # Reconfirm the new app before touching previous versions.
-          Assert-AFClientPublishedApp `
+          Assert-AFClientAssignments `
             -AppId $journal.AppId `
-            -ApplicationId $appId `
-            -Version $version `
-            -TimeoutSeconds 0 |
-          Out-Null
+            -Plan $plan
 
-          if ($configuration.unassign_previous_assignments) {
-            foreach ($previous in $previousApps) {
-              Remove-AFIntuneAppAssignments `
+          $stage = "ApplyESP"
+
+          if ($configuration.esp_assignments) {
+            Set-AFApplicationClientESPAssignments `
+              -configuration $configuration `
+              -ErrorAction Stop |
+            Out-Null
+          }
+
+          $stage = "PreviousVersionCleanup"
+          $journal.Stage = $stage
+
+          Save-AFClientProcessJournal `
+            -Path $journalPath `
+            -Journal $journal
+
+          if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace) {
+            # Reconfirm the new app before touching previous versions.
+            Assert-AFClientPublishedApp `
+              -AppId $journal.AppId `
+              -ApplicationId $appId `
+              -Version $version `
+              -TimeoutSeconds 0 |
+            Out-Null
+
+            if ($configuration.unassign_previous_assignments) {
+              foreach ($previous in $previousApps) {
+                Remove-AFIntuneAppAssignments `
+                  -Id ([guid]$previous.id) `
+                  -ApplicationId $appId `
+                  -Version ([string]$previous.displayVersion) `
+                  -ProtectedAppId $journal.AppId `
+                  -ErrorAction Stop |
+                Out-Null
+              }
+            }
+
+            for (
+              $index = $keepPrevious;
+              $index -lt $previousApps.Count;
+              $index++
+            ) {
+              $previous = $previousApps[$index]
+
+              Remove-AFIntuneWin32App `
                 -Id ([guid]$previous.id) `
                 -ApplicationId $appId `
                 -Version ([string]$previous.displayVersion) `
@@ -560,24 +751,9 @@ function Start-AFClientProcess {
                 -ErrorAction Stop |
               Out-Null
             }
-          }
+          }        
 
-          for (
-            $index = $keepPrevious;
-            $index -lt $previousApps.Count;
-            $index++
-          ) {
-            $previous = $previousApps[$index]
-
-            Remove-AFIntuneWin32App `
-              -Id ([guid]$previous.id) `
-              -ApplicationId $appId `
-              -Version ([string]$previous.displayVersion) `
-              -ProtectedAppId $journal.AppId `
-              -ErrorAction Stop |
-            Out-Null
-          }
-        }        
+        }
 
         $stage = "Complete"
         $journal.State = "Complete"
@@ -601,6 +777,15 @@ function Start-AFClientProcess {
             (Protect-AFNativeDiagnostic -Text $_.Exception.Message)
           ) -WarningAction Continue
         }
+
+        $results.Add([PSCustomObject]@{
+            Application = $appName
+            Version     = $version
+            State       = "Complete"
+            AppId       = [string]$journal.AppId
+            JournalPath = $journalPath
+            Operation   = [string]$journal.Operation
+          })
 
         Write-AFLogEntry `
           -Message "[$appName] :: Client process completed for version $version." `

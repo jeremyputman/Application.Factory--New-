@@ -159,6 +159,22 @@ function Publish-AFApplicationClientAppNative {
       throw "At least one detection rule is required."
     }
 
+    $additionalRules = $null
+    $additionalProperty = $data.requirementrule.PSObject.Properties[
+      "additionalrules"
+    ]
+
+    if ($null -ne $additionalProperty) {
+      if ($null -eq $additionalProperty.Value) {
+        throw "Additional requirement rules must be an array, not null."
+      }
+      $additionalRules = $additionalProperty.Value
+    }
+
+    $requirementRules = @(
+      New-AFApplicationClientRequirement -Rules $additionalRules
+    )
+    
     # Preserve the existing behavior when an older API omits the setting.
     $includeVersionInDisplayName = $true
     $nameProperty = $Configuration.PSObject.Properties[
@@ -223,7 +239,7 @@ function Publish-AFApplicationClientAppNative {
       allowedArchitectures           = $architecture
       minimumSupportedWindowsRelease = $minimumRelease
       detectionRules                 = $detectionRules
-      requirementRules               = @()
+      requirementRules               = $requirementRules
       allowAvailableUninstall        = $allowUninstall
       notes                          = "$($data.Information.Notes)`nAppFactoryID:$($application.id)"
       installExperience              = @{
@@ -288,6 +304,18 @@ function Publish-AFApplicationClientAppNative {
       }
     }
 
+    $checkpoint = Get-Variable `
+      -Name af_native_publication_journal `
+      -Scope Script `
+      -ErrorAction SilentlyContinue
+      
+    if ($null -ne $checkpoint -and $checkpoint.Value.Enabled) {
+      $checkpoint.Value.Journal.ExpectedDetectionRules = @($detectionRules)
+      $checkpoint.Value.Journal.ExpectedArchitectures = [string]$architecture
+      $checkpoint.Value.Journal.ExpectedRequirementRules = @($requirementRules)
+      $checkpoint.Value.Journal.RequirementRulesSchemaVersion = 1
+    }    
+
     # Check explicit AzCopy configuration before creating an app.
     if ($UploadTransport -eq "AzCopy") {
       if (-not $AzCopyPath) {
@@ -326,11 +354,7 @@ function Publish-AFApplicationClientAppNative {
         if (-not $body.ContainsKey($name)) { $body[$name] = "" }
       }
 
-      $checkpoint = Get-Variable -Name af_native_publication_journal -Scope Script -ErrorAction SilentlyContinue
-      if ($null -ne $checkpoint -and $checkpoint.Value.Enabled) {
-        $checkpoint.Value.Journal.ExpectedDetectionRules = @($detectionRules)
-        $checkpoint.Value.Journal.ExpectedArchitectures = [string]$architecture
-      }
+
 
       $status.Stage = "ValidateReplacementTarget"
       $status.AppId = [string]([guid]$ExistingAppId)
@@ -581,6 +605,12 @@ function Publish-AFApplicationClientAppNative {
               -ExpectedRules $detectionRules `
               -ActualRules @($lastApp.detectionRules))) {
           throw "Published detection rules do not match the downloaded package metadata."
+        }
+
+        if (-not (Test-AFNativeRequirementRulesMatch `
+              -ExpectedRules $requirementRules `
+              -ActualRules $lastApp.requirementRules)) {
+          throw "Published requirement rules do not match the downloaded package metadata."
         }
 
         $status.Stage = "Complete"

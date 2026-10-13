@@ -48,5 +48,9 @@ function Get-AFApplicationClientFiles{
       continue
     }
   }
-  $script:application_data = Get-Content -Path (Join-Path -Path $download_folder -ChildPath "App.json") | ConvertFrom-Json -Depth 10
+  $script:application_data = Get-Content `
+    -LiteralPath (Join-Path $download_folder "App.json") `
+    -Raw `
+    -Encoding UTF8 |
+    ConvertFrom-Json -Depth 10 -DateKind String
 }

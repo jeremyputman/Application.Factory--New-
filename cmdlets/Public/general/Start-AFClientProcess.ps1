@@ -448,6 +448,8 @@ function Start-AFClientProcess {
           else { "" }
           AssignmentSnapshot       = @($assignmentSnapshot)
           ExpectedDetectionRules   = @()
+          ExpectedRequirementRules = @()
+          RequirementRulesSchemaVersion = 0
           ExpectedArchitectures    = ""
           State                    = "Preparing"
           Stage                    = "Preflight"
@@ -470,6 +472,28 @@ function Start-AFClientProcess {
             -ApplicationId $appId `
             -Version $version `
             -TimeoutSeconds 0
+
+
+          if ([int]$existingJournal.RequirementRulesSchemaVersion -ne 1) {
+            throw (
+              "This journal does not contain verified requirement-rule expectations. " +
+              "Reconcile the existing publication before starting a new attempt."
+            )
+          }
+          
+          $expectedRequirementRules = @(
+            $existingJournal.ExpectedRequirementRules |
+              Where-Object { $null -ne $_ }
+          )
+          
+          if (-not (Test-AFNativeRequirementRulesMatch `
+                -ExpectedRules $expectedRequirementRules `
+                -ActualRules $published.requirementRules)) {
+            throw "Resume requires the saved requirement rules to match Graph."
+          }
+          
+          $journal.ExpectedRequirementRules = @($expectedRequirementRules)
+          $journal.RequirementRulesSchemaVersion = 1
 
           if ($inPlaceOperation) {
             if (

@@ -2,6 +2,7 @@
 - Bug fix for leaking variable scope in Copy-AFApplicationClientGroups
 - Working at removing dependency on external Intune powershell module
 - Changed argumentList to -AdditionalArgumentList for MSI so it always defaults to /qn
+- Allow version in file name or not. User config
 
 # 0.1.15
 - Added a check if ArgumentList is empty

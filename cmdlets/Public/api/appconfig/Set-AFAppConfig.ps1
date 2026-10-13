@@ -43,6 +43,10 @@
     Version string for configuration.
 .PARAMETER replace_in_place
     Replace the installer on the existing managed Intune app. False creates a new app.
+.PARAMETER include_version_in_display_name
+    Include the version in the Intune display name. Defaults to true for
+    new configurations. When omitted during an update, preserves the
+    existing setting.    
 .OUTPUTS
     The response from the API call.
 .EXAMPLE
@@ -70,7 +74,8 @@ function Set-AFAppConfig {
     [Alias("interactiveInstall")][Parameter()][bool]$interactive_install = $false,
     [Alias("interactiveUninstall")][Parameter()][bool]$interactive_uninstall = $false,
     [Parameter()][string]$versions,
-    [Alias("replaceInPlace")][Parameter()][bool]$replace_in_place
+    [Alias("replaceInPlace")][Parameter()][bool]$replace_in_place,
+    [Alias("includeVersionInDisplayName")][Parameter()][bool]$include_version_in_display_name = $true
   )
   # Check for required API header
   if (-not $script:api_header) {

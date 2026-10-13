@@ -159,10 +159,28 @@ function Publish-AFApplicationClientAppNative {
       throw "At least one detection rule is required."
     }
 
-    $displayName = (
-      "$script:app_prefix$($application.Name) " +
-      "$script:published_version"
-    )
+    # Preserve the existing behavior when an older API omits the setting.
+    $includeVersionInDisplayName = $true
+    $nameProperty = $Configuration.PSObject.Properties[
+    "include_version_in_display_name"
+    ]
+
+    if (
+      $null -ne $nameProperty -and
+      $null -ne $nameProperty.Value
+    ) {
+      if ($nameProperty.Value -isnot [bool]) {
+        throw "include_version_in_display_name must be a JSON boolean."
+      }
+
+      $includeVersionInDisplayName = $nameProperty.Value
+    }
+
+    $displayName = "$script:app_prefix$($application.Name)"
+
+    if ($includeVersionInDisplayName) {
+      $displayName += " $script:published_version"
+    }
 
     $description = [string]$data.Information.Description
 

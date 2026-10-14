@@ -9,6 +9,7 @@ function Get-AFClientReplacementTarget {
 
         # Retained for compatibility with existing callers.
         # ApplicationName does not determine identity.
+        [ValidateSet("normal", "updater")][string]$ApplicationRole = "normal",
         [string]$ApplicationName
     )
 
@@ -22,7 +23,8 @@ function Get-AFClientReplacementTarget {
         $MatchingApps |
             Where-Object {
                 $_.'@odata.type' -eq "#microsoft.graph.win32LobApp" -and
-                [string]$_.notes -match $marker
+                [string]$_.notes -match $marker -and
+                (Get-AFNativeAppRole -Notes ([string]$_.notes)) -eq $ApplicationRole
             } |
             Sort-Object createdDateTime, id -Descending
     )
@@ -51,6 +53,7 @@ function Get-AFClientReplacementTarget {
 
     # Revalidate ownership, version, and readiness using the exact AppId.
     $verified = Get-AFNativeManagedApp `
+        -ApplicationRole $ApplicationRole `
         -Id ([guid]$candidate.id) `
         -ApplicationId $ApplicationId `
         -Version ([string]$candidate.displayVersion)

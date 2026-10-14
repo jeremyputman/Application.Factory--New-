@@ -27,10 +27,10 @@ function Start-AFClientProcess {
   }
 
   if (
-    $PSVersionTable.PSVersion.Major -lt 7 -or
+    $PSVersionTable.PSVersion -lt [version]"7.5" -or
     -not $IsWindows
   ) {
-    throw "Client publishing requires PowerShell 7 on Windows."
+    throw "Client publishing requires PowerShell 7.5 or newer on Windows."
   }  
 
   if (
@@ -128,7 +128,17 @@ function Start-AFClientProcess {
       )
     }
 
+    $resumeRole = ""
+    if ($ResumePublishedAppId) {
+      $resumeApp = Invoke-AFNativeGraphRequest -Method GET -Uri "deviceAppManagement/mobileApps/$ResumePublishedAppId"
+      $resumeRole = Get-AFNativeAppRole -Notes ([string]$resumeApp.notes)
+    }
+    $roleParameters = @{ Configurations = $configurations; DownloadOnly = $DownloadOnly }
+    if ($resumeRole) { $roleParameters.ResumeRole = $resumeRole }
+    $configurations = @(New-AFClientRoleConfigurations @roleParameters)
+
     foreach ($configuration in $configurations) {
+      $role = [string]$configuration.PublicationRole
       $application = $configuration.application
       $appId = [string]$application.id
       $appName = [string]$application.Name
@@ -182,6 +192,7 @@ function Start-AFClientProcess {
 
           $results.Add([PSCustomObject]@{
               Application = $appName
+              Role        = $role
               Version     = $version
               State       = "Downloaded"
               AppId       = ""
@@ -192,6 +203,7 @@ function Start-AFClientProcess {
         }
 
         $journalPath = Get-AFClientProcessJournalPath `
+          -ApplicationRole $role `
           -ApplicationId $appId `
           -Version $version
 
@@ -201,7 +213,7 @@ function Start-AFClientProcess {
           $existingJournal = Get-Content `
             -LiteralPath $journalPath `
             -Raw |
-          ConvertFrom-Json
+          ConvertFrom-Json -DateKind String
 
           if (
             $existingJournal.ApplicationId -ne $appId -or
@@ -209,6 +221,10 @@ function Start-AFClientProcess {
           ) {
             throw "Saved client-process status has an invalid identity."
           }
+
+          $savedRole = "normal"
+          if ($existingJournal.PSObject.Properties["PublicationRole"]) { $savedRole = [string]$existingJournal.PublicationRole }
+          if ($savedRole -ne $role) { throw "Saved journal belongs to a different publication role." }
 
           if (
             $existingJournal.State -ne "Complete" -and
@@ -235,7 +251,8 @@ function Start-AFClientProcess {
         $matchingApps = @(
           $intuneApps |
           Where-Object {
-            [string]$_.notes -match $identityPattern
+            [string]$_.notes -match $identityPattern -and
+            (Get-AFNativeAppRole -Notes ([string]$_.notes)) -eq $role
           } |
           Sort-Object createdDateTime -Descending
         )
@@ -250,14 +267,18 @@ function Start-AFClientProcess {
             ) -Filter "*.json" -File -ErrorAction Stop
           )) {
           $saved = Get-Content -LiteralPath $stateFile.FullName -Raw |
-          ConvertFrom-Json -ErrorAction Stop
+          ConvertFrom-Json -DateKind String -ErrorAction Stop
           if (
             [string]$saved.ApplicationId -ne $appId -or
             [string]$saved.TenantId -ne [string]$script:appregistration_tenant -or
             [string]$saved.ClientId -ne [string]$script:client_id
           ) { continue }
 
+          $savedRole = "normal"
+          if ($saved.PSObject.Properties["PublicationRole"]) { $savedRole = [string]$saved.PublicationRole }
+          if ($savedRole -ne $role) { continue }
           $expectedPath = Get-AFClientProcessJournalPath `
+          -ApplicationRole $role `
             -ApplicationId $appId `
             -Version ([string]$saved.Version)
           if ($stateFile.FullName -ne $expectedPath) { continue }
@@ -291,6 +312,7 @@ function Start-AFClientProcess {
         }
         elseif ($replaceInPlace) {
           $replacementTarget = Get-AFClientReplacementTarget `
+            -ApplicationRole $role `
             -MatchingApps $matchingApps `
             -ApplicationId $appId `
             -ApplicationName $appName
@@ -302,6 +324,7 @@ function Start-AFClientProcess {
             ) {
               $results.Add([PSCustomObject]@{
                   Application = $appName
+              Role        = $role
                   Version     = $version
                   State       = "AlreadyPublished"
                   AppId       = [string]$replacementTarget.id
@@ -351,6 +374,7 @@ function Start-AFClientProcess {
           if (-not $inPlaceOperation -and $readySameVersion.Count -gt 0 -and -not $Force) {
             $results.Add([PSCustomObject]@{
                 Application = $appName
+              Role        = $role
                 Version     = $version
                 State       = "AlreadyPublished"
                 AppId       = [string]$readySameVersion[0].id
@@ -385,7 +409,7 @@ function Start-AFClientProcess {
         }
 
         $plan = $null
-        if (-not $inPlaceOperation) {
+        if (-not $inPlaceOperation -or $role -eq "updater") {
           # Validate expected targets and filters before app creation.
           $plan = Get-AFClientAssignmentPlan `
             -Configuration $configuration `
@@ -425,6 +449,7 @@ function Start-AFClientProcess {
 
         $journal = [ordered]@{
           ApplicationId            = $appId
+          PublicationRole          = $role
           ApplicationName          = $appName
           Version                  = $version
           TenantId                 = [string]$script:appregistration_tenant
@@ -468,6 +493,7 @@ function Start-AFClientProcess {
           $stage = "ValidateResumeApplication"
 
           $published = Assert-AFClientPublishedApp `
+            -ApplicationRole $role `
             -AppId $ResumePublishedAppId `
             -ApplicationId $appId `
             -Version $version `
@@ -680,6 +706,7 @@ function Start-AFClientProcess {
         $stage = "ConfirmPublished"
 
         $script:published_application = Assert-AFClientPublishedApp `
+            -ApplicationRole $role `
           -AppId $journal.AppId `
           -ApplicationId $appId `
           -Version $version
@@ -691,7 +718,12 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        if ($inPlaceOperation) {
+        if ($inPlaceOperation -and $role -eq "updater") {
+          $stage = "ApplyUpdaterAssignments"
+          Set-AFApplicationClientGroups -configuration $configuration -Plan $plan -ErrorAction Stop | Out-Null
+          Assert-AFClientAssignments -AppId $journal.AppId -Plan $plan
+        }
+        elseif ($inPlaceOperation) {
           $stage = "VerifyPreservedAssignments"
           Assert-AFClientAssignmentsUnchanged `
             -AppId ([guid]$journal.AppId) `
@@ -742,6 +774,7 @@ function Start-AFClientProcess {
           if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace) {
             # Reconfirm the new app before touching previous versions.
             Assert-AFClientPublishedApp `
+            -ApplicationRole $role `
               -AppId $journal.AppId `
               -ApplicationId $appId `
               -Version $version `
@@ -751,6 +784,7 @@ function Start-AFClientProcess {
             if ($configuration.unassign_previous_assignments) {
               foreach ($previous in $previousApps) {
                 Remove-AFIntuneAppAssignments `
+                  -ApplicationRole $role `
                   -Id ([guid]$previous.id) `
                   -ApplicationId $appId `
                   -Version ([string]$previous.displayVersion) `
@@ -768,6 +802,7 @@ function Start-AFClientProcess {
               $previous = $previousApps[$index]
 
               Remove-AFIntuneWin32App `
+                -ApplicationRole $role `
                 -Id ([guid]$previous.id) `
                 -ApplicationId $appId `
                 -Version ([string]$previous.displayVersion) `
@@ -804,6 +839,7 @@ function Start-AFClientProcess {
 
         $results.Add([PSCustomObject]@{
             Application = $appName
+              Role        = $role
             Version     = $version
             State       = "Complete"
             AppId       = [string]$journal.AppId
@@ -878,6 +914,7 @@ function Start-AFClientProcess {
 
         $results.Add([PSCustomObject]@{
             Application = $appName
+              Role        = $role
             Version     = $version
             State       = "Failed"
             Stage       = $stage

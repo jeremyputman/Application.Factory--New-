@@ -12,16 +12,21 @@ function Publish-AFApplicationClientAppNative {
   )
 
   if (
-    $PSVersionTable.PSVersion.Major -lt 7 -or
+    $PSVersionTable.PSVersion -lt [version]"7.5" -or
     -not $IsWindows
   ) {
-    throw "Native publishing requires PowerShell 7 on Windows."
+    throw "Native publishing requires PowerShell 7.5 or newer on Windows."
   }
 
   $script:published_application = $null
 
   $application = $Configuration.application
   $data = $script:application_data
+  $role = "normal"
+  if ($Configuration.PSObject.Properties["PublicationRole"]) {
+    $role = [string]$Configuration.PublicationRole
+  }
+  if ($role -notin @("normal", "updater")) { throw "Unsupported publication role." }
 
   if (
     -not $application -or
@@ -52,6 +57,7 @@ function Publish-AFApplicationClientAppNative {
     Operation        = if ($ExistingAppId) { "ReplaceInPlace" } else { "Create" }
     ApplicationName  = [string]$application.Name
     AppFactoryId     = [string]$application.id
+    PublicationRole  = $role
     AppId            = ""
     ContentVersionId = ""
     FileId           = ""
@@ -175,6 +181,19 @@ function Publish-AFApplicationClientAppNative {
       New-AFApplicationClientRequirement -Rules $additionalRules
     )
     
+    if ($role -eq "updater") {
+      $updaterRules = @(Resolve-AFUpdaterRequirementRules `
+        -Rules $data.requirementrule.updaterrules `
+        -PublishedVersion ([string]$script:published_version))
+      $updaterGraphRules = @(New-AFApplicationClientRequirement -Rules $updaterRules)
+      $detectionRules = @(New-AFUpdaterDetectionRules -UpdaterRequirements $updaterGraphRules -NormalDetectionRules $detectionRules -PublishedVersion ([string]$script:published_version))
+      $combined = @()
+      if ($null -ne $additionalRules) { $combined += @($additionalRules) }
+      $combined += $updaterRules
+      # Convert together to reject duplicate script rule names across editors.
+      $requirementRules = @(New-AFApplicationClientRequirement -Rules $combined)
+    }
+
     # Preserve the existing behavior when an older API omits the setting.
     $includeVersionInDisplayName = $true
     $nameProperty = $Configuration.PSObject.Properties[
@@ -197,6 +216,8 @@ function Publish-AFApplicationClientAppNative {
     if ($includeVersionInDisplayName) {
       $displayName += " $script:published_version"
     }
+
+    if ($role -eq "updater") { $displayName += " (Updater)" }
 
     $description = [string]$data.Information.Description
 
@@ -226,6 +247,11 @@ function Publish-AFApplicationClientAppNative {
       )
     }
 
+    # Ownership lines are reserved for AppFactory.
+    $notes = ([string]$data.Information.Notes -split '\r?\n' |
+      Where-Object { $_ -notmatch '^\s*AppFactory(?:ID|Role):' }) -join "`n"
+    $notes += "`nAppFactoryID:$($application.id)`nAppFactoryRole:$role"
+
     $body = @{
       "@odata.type"                  = "#microsoft.graph.win32LobApp"
       displayName                    = $displayName
@@ -241,7 +267,7 @@ function Publish-AFApplicationClientAppNative {
       detectionRules                 = $detectionRules
       requirementRules               = $requirementRules
       allowAvailableUninstall        = $allowUninstall
-      notes                          = "$($data.Information.Notes)`nAppFactoryID:$($application.id)"
+      notes                          = $notes
       installExperience              = @{
         "@odata.type"         = "#microsoft.graph.win32LobAppInstallExperience"
         runAsAccount          = $runAs
@@ -361,6 +387,7 @@ function Publish-AFApplicationClientAppNative {
       Save-AFNativePublishCheckpoint -Status $status
 
       $app = Get-AFNativeManagedApp `
+        -ApplicationRole $role `
         -Id ([guid]$ExistingAppId) `
         -ApplicationId ([string]$application.id) `
         -Version $ExpectedDisplayVersion
@@ -527,6 +554,7 @@ function Publish-AFApplicationClientAppNative {
       if (
         $currentApp.'@odata.type' -ne "#microsoft.graph.win32LobApp" -or
         [string]$currentApp.notes -notmatch $marker -or
+        (Get-AFNativeAppRole -Notes ([string]$currentApp.notes)) -ne $role -or
         [string]$currentApp.displayVersion -cne $ExpectedDisplayVersion -or
         [string]$currentApp.committedContentVersion -cne $ExpectedContentVersion
       ) {
@@ -613,6 +641,9 @@ function Publish-AFApplicationClientAppNative {
           throw "Published requirement rules do not match the downloaded package metadata."
         }
 
+        if ((Get-AFNativeAppRole -Notes ([string]$lastApp.notes)) -ne $role) {
+          throw "Published application role does not match the requested role."
+        }
         $status.Stage = "Complete"
         $script:published_application = $lastApp
 

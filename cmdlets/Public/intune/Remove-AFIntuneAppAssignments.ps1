@@ -4,11 +4,13 @@ function Remove-AFIntuneAppAssignments {
     [Parameter(Mandatory)][guid]$Id,
     [Parameter(Mandatory)][string]$ApplicationId,
     [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("normal", "updater")][string]$ApplicationRole = "normal",
     [string]$ProtectedAppId = [string]$script:published_application.id,
     [ValidateRange(0, 600)][int]$TimeoutSeconds = 120
   )
 
   $app = Get-AFNativeManagedApp `
+      -ApplicationRole $ApplicationRole `
     -Id $Id `
     -ApplicationId $ApplicationId `
     -Version $Version `
@@ -37,6 +39,7 @@ function Remove-AFIntuneAppAssignments {
 
     # Revalidate ownership immediately before each deletion.
     $verifiedApp = Get-AFNativeManagedApp `
+      -ApplicationRole $ApplicationRole `
       -Id $Id `
       -ApplicationId $ApplicationId `
       -Version $Version `

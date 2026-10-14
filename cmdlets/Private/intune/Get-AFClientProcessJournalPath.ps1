@@ -2,7 +2,8 @@ function Get-AFClientProcessJournalPath {
   [CmdletBinding()]
   param(
     [Parameter(Mandatory)][string]$ApplicationId,
-    [Parameter(Mandatory)][string]$Version
+    [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("normal", "updater")][string]$ApplicationRole = "normal"
   )
 
   # Separate clients, tenants, prefixes, applications, and versions.
@@ -10,7 +11,7 @@ function Get-AFClientProcessJournalPath {
     [string]$script:appregistration_tenant
     [string]$script:client_id
     [string]$script:app_prefix
-    $ApplicationId
+    $(if ($ApplicationRole -eq "normal") { $ApplicationId } else { "$ApplicationId|updater" })
     $Version
   ) -Compress
 

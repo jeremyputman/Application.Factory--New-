@@ -4,6 +4,7 @@ function Assert-AFClientPublishedApp {
     [Parameter(Mandatory)][string]$AppId,
     [Parameter(Mandatory)][string]$ApplicationId,
     [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("normal", "updater")][string]$ApplicationRole = "normal",
     [ValidateRange(0, 3600)][int]$TimeoutSeconds = 120
   )
 
@@ -22,7 +23,8 @@ function Assert-AFClientPublishedApp {
     if (
       $app.'@odata.type' -ne "#microsoft.graph.win32LobApp" -or
       [string]$app.notes -notmatch $identityPattern -or
-      [string]$app.displayVersion -cne $Version
+      [string]$app.displayVersion -cne $Version -or
+    (Get-AFNativeAppRole -Notes ([string]$app.notes)) -ne $ApplicationRole
     ) {
       throw "Application $AppId does not match the requested app/version."
     }

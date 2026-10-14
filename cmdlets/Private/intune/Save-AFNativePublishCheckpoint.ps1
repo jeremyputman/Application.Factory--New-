@@ -29,6 +29,7 @@ function Save-AFNativePublishCheckpoint {
   }
 
   if (
+    [string]$journal.PublicationRole -ne [string]$Status.PublicationRole -or
     [string]$journal.ApplicationId -ne
     [string]$Status.AppFactoryId -or
     [string]$journal.Version -cne

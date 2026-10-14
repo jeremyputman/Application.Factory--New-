@@ -4,6 +4,7 @@ function Get-AFNativeManagedApp {
     [Parameter(Mandatory)][guid]$Id,
     [Parameter(Mandatory)][string]$ApplicationId,
     [Parameter(Mandatory)][string]$Version,
+    [ValidateSet("normal", "updater")][string]$ApplicationRole = "normal",
     [string]$ProtectedAppId
   )
 
@@ -37,7 +38,8 @@ function Get-AFNativeManagedApp {
   if (
     $app.'@odata.type' -ne "#microsoft.graph.win32LobApp" -or
     [string]$app.notes -notmatch $pattern -or
-    [string]$app.displayVersion -cne $Version
+    [string]$app.displayVersion -cne $Version -or
+    (Get-AFNativeAppRole -Notes ([string]$app.notes)) -ne $ApplicationRole
   ) {
     throw "Application $Id does not match the expected AppFactory identity/version."
   }

@@ -45,6 +45,8 @@
     Include the version in the Intune display name. Defaults to true for
     new configurations. When omitted during an update, preserves the
     existing setting.    
+.PARAMETER create_updater_app
+    Publish a separate updater assigned Required to All devices.
 .OUTPUTS
     The response from the API call.
 .EXAMPLE
@@ -62,6 +64,7 @@ function New-AFAppConfig {
     [Alias("assignmentUninstall", "UninstallAssignments")][Parameter()][string[]]$assignment_uninstall,
     [Alias("assignmentUninstallExceptions", "UninstallExceptions")][Parameter()][string[]]$assignment_uninstall_exceptions,
     [Alias("AddToIntune")][Parameter()][bool]$enabled = $false,
+    [Parameter()][bool]$create_updater_app,
     [Alias("downloadForeground", "foreground")][Parameter()][bool]$download_foreground = $false,
     [Alias("keepPreviousVersions", "KeepPrevious")][Parameter()][int]$keep_previous_versions = 0,
     [Alias("copyPreviousAssignments", "CopyPrevious")][Parameter()][bool]$copy_previous_assignments = $false,

@@ -11,11 +11,23 @@ function Set-AFApplicationClientGroups {
     throw "A published application ID is required."
   }
 
+  $role = "normal"
+
+  if ($configuration.PSObject.Properties["PublicationRole"]) {
+    $role = [string]$configuration.PublicationRole
+  }
+
+  if ($role -notin @("normal", "updater")) {
+    throw "Unsupported publication role for assignment processing."
+  }
+
   Assert-AFClientPublishedApp `
+    -ApplicationRole $role `
     -AppId $publishedId `
     -ApplicationId ([string]$configuration.application.id) `
     -Version ([string]$script:published_version) `
-    -TimeoutSeconds 0 | Out-Null
+    -TimeoutSeconds 0 |
+  Out-Null
 
   if ($null -eq $Plan) {
     $Plan = Get-AFClientAssignmentPlan `

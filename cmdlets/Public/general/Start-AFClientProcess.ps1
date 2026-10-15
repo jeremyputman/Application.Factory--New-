@@ -128,6 +128,10 @@ function Start-AFClientProcess {
       )
     }
 
+    # Use the full enabled client catalog for dependency resolution, even for a single-app run.
+    $dependencyCatalog = @(Get-AFApplicationConfigurations -id $script:client_id -ErrorAction Stop)
+    $configurations = @(Get-AFDependencyOrderedConfigurations -Configurations $configurations -Catalog $dependencyCatalog)
+
     $resumeRole = ""
     if ($ResumePublishedAppId) {
       $resumeApp = Invoke-AFNativeGraphRequest -Method GET -Uri "deviceAppManagement/mobileApps/$ResumePublishedAppId"
@@ -138,6 +142,11 @@ function Start-AFClientProcess {
     $configurations = @(New-AFClientRoleConfigurations @roleParameters)
 
     foreach ($configuration in $configurations) {
+      # Refresh identity inventory after earlier prerequisites were published.
+      if (-not $DownloadOnly) {
+        $filter = [uri]::EscapeDataString("isof('microsoft.graph.win32LobApp') and contains(notes,'AppFactoryID:')")
+        $intuneApps = @(Get-AFClientGraphCollection -Uri "deviceAppManagement/mobileApps?%24filter=$filter")
+      }
       $role = [string]$configuration.PublicationRole
       $application = $configuration.application
       $appId = [string]$application.id
@@ -167,6 +176,10 @@ function Start-AFClientProcess {
       $inPlaceOperation = $false
       $replacementTarget = $null
       $assignmentSnapshot = @()
+      $reconciliationOnly = $false
+      $reconcileExistingId = ""
+      $dependencyBindings = @()
+      $cleanupBlocked = [Collections.Generic.List[object]]::new()
 
       try {
         if (
@@ -322,15 +335,8 @@ function Start-AFClientProcess {
               [string]$replacementTarget.displayVersion -ceq $version -and
               -not $Force
             ) {
-              $results.Add([PSCustomObject]@{
-                  Application = $appName
-              Role        = $role
-                  Version     = $version
-                  State       = "AlreadyPublished"
-                  AppId       = [string]$replacementTarget.id
-                  JournalPath = $journalPath
-                })
-              continue
+              $reconcileExistingId = [string]$replacementTarget.id
+              $reconciliationOnly = $true
             }
             $assignmentSnapshot = @(
               Get-AFClientGraphCollection -Uri (
@@ -372,16 +378,10 @@ function Start-AFClientProcess {
           }
 
           if (-not $inPlaceOperation -and $readySameVersion.Count -gt 0 -and -not $Force) {
-            $results.Add([PSCustomObject]@{
-                Application = $appName
-              Role        = $role
-                Version     = $version
-                State       = "AlreadyPublished"
-                AppId       = [string]$readySameVersion[0].id
-                JournalPath = $journalPath
-              })
-
-            continue
+            if ($readySameVersion.Count -ne 1) { throw "This version has multiple published targets." }
+            $reconcileExistingId = [string]$readySameVersion[0].id
+            $reconciliationOnly = $true
+            $assignmentSnapshot = @(Get-AFClientGraphCollection -Uri "deviceAppManagement/mobileApps/$reconcileExistingId/assignments")
           }
         }
 
@@ -391,7 +391,8 @@ function Start-AFClientProcess {
             [int]$_.uploadState -eq 1 -and
             $_.publishingState -eq "published" -and
             $_.committedContentVersion -and
-            [string]$_.id -ne $ResumePublishedAppId
+            [string]$_.id -ne $ResumePublishedAppId -and
+            [string]$_.id -ne $reconcileExistingId
           }
         )
 
@@ -408,8 +409,24 @@ function Start-AFClientProcess {
           }
         }
 
+        if ($replacementTarget) {
+          Assert-AFDependencyScope -App $replacementTarget -Configuration $configuration
+          if (-not $reconciliationOnly -and $role -eq "normal") {
+            Assert-AFInPlaceDependenciesSafe -App $replacementTarget
+          }
+        }
+        if ($ResumePublishedAppId) {
+          if ($existingJournal.DependencySchemaVersion -ne 1) {
+            throw "Resume requires a dependency-aware journal. Inspect the existing publication before continuing."
+          }
+          $dependencyBindings = @($existingJournal.ExpectedDependencies)
+          $reconciliationOnly = $existingJournal.Operation -eq "ReconcileOnly"
+        } else {
+          $dependencyBindings = @(Resolve-AFDependencyBindings -Configuration $configuration -Catalog $dependencyCatalog)
+        }
+
         $plan = $null
-        if (-not $inPlaceOperation -or $role -eq "updater") {
+        if (-not $reconciliationOnly -and (-not $inPlaceOperation -or $role -eq "updater")) {
           # Validate expected targets and filters before app creation.
           $plan = Get-AFClientAssignmentPlan `
             -Configuration $configuration `
@@ -448,6 +465,12 @@ function Start-AFClientProcess {
         }
 
         $journal = [ordered]@{
+          ConfigurationId          = [string]$configuration.id
+          DependencySchemaVersion  = 1
+          ExpectedDependencies     = @($dependencyBindings)
+          DependencyOperations     = if ($ResumePublishedAppId) { @($existingJournal.DependencyOperations) } else { @() }
+          ReconcileReverseDependencies = if ($ResumePublishedAppId) { [bool]$existingJournal.ReconcileReverseDependencies } else { [bool]$configuration.reconcile_reverse_dependencies }
+          CleanupBlocked           = @()
           ApplicationId            = $appId
           PublicationRole          = $role
           ApplicationName          = $appName
@@ -455,7 +478,7 @@ function Start-AFClientProcess {
           TenantId                 = [string]$script:appregistration_tenant
           ClientId                 = [string]$script:client_id
           Publisher                = "Native"
-          Operation                = if ($inPlaceOperation) { "ReplaceInPlace" } else { "Create" }
+          Operation                = if ($reconciliationOnly) { "ReconcileOnly" } elseif ($inPlaceOperation) { "ReplaceInPlace" } else { "Create" }
           AppPrefix                = [string]$script:app_prefix
           OriginalDisplayVersion   = if ($replacementTarget) {
             [string]$replacementTarget.displayVersion
@@ -489,7 +512,16 @@ function Start-AFClientProcess {
           UpdatedUtc               = ""
         }
 
-        if ($ResumePublishedAppId) {
+        if ($reconcileExistingId) {
+          $journal.AppId = $reconcileExistingId
+          $journal.AssignmentSnapshot = @($assignmentSnapshot)
+          $ready = Assert-AFClientPublishedApp -ApplicationRole $role -AppId $reconcileExistingId -ApplicationId $appId -Version $version -TimeoutSeconds 0
+          Assert-AFDependencyScope -App $ready -Configuration $configuration
+          $journal.ExpectedRequirementRules = @($ready.requirementRules)
+          $journal.RequirementRulesSchemaVersion = 1
+          Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        }
+        elseif ($ResumePublishedAppId) {
           $stage = "ValidateResumeApplication"
 
           $published = Assert-AFClientPublishedApp `
@@ -518,6 +550,8 @@ function Start-AFClientProcess {
             throw "Resume requires the saved requirement rules to match Graph."
           }
           
+          if ([string]$existingJournal.ConfigurationId -ne [string]$configuration.id) { throw "Resume configuration identity differs." }
+          $assignmentSnapshot = @($existingJournal.AssignmentSnapshot)
           $journal.ExpectedRequirementRules = @($expectedRequirementRules)
           $journal.RequirementRulesSchemaVersion = 1
 
@@ -718,12 +752,17 @@ function Start-AFClientProcess {
           -Path $journalPath `
           -Journal $journal
 
-        if ($inPlaceOperation -and $role -eq "updater") {
+        $stage = "ApplyDependencies"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        Set-AFPublishedDependencies -Configuration $configuration -Bindings $dependencyBindings -Journal $journal -JournalPath $journalPath
+
+        if ($inPlaceOperation -and $role -eq "updater" -and -not $reconciliationOnly) {
           $stage = "ApplyUpdaterAssignments"
           Set-AFApplicationClientGroups -configuration $configuration -Plan $plan -ErrorAction Stop | Out-Null
           Assert-AFClientAssignments -AppId $journal.AppId -Plan $plan
         }
-        elseif ($inPlaceOperation) {
+        elseif ($inPlaceOperation -or $reconciliationOnly) {
           $stage = "VerifyPreservedAssignments"
           Assert-AFClientAssignmentsUnchanged `
             -AppId ([guid]$journal.AppId) `
@@ -764,54 +803,45 @@ function Start-AFClientProcess {
             Out-Null
           }
 
-          $stage = "PreviousVersionCleanup"
-          $journal.Stage = $stage
+        }
 
-          Save-AFClientProcessJournal `
-            -Path $journalPath `
-            -Journal $journal
+        $stage = "ReconcileReverseDependencies"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        $reverseConfiguration = $configuration.PSObject.Copy()
+        $reverseConfiguration | Add-Member -NotePropertyName reconcile_reverse_dependencies -NotePropertyValue ([bool]$journal.ReconcileReverseDependencies) -Force
+        Invoke-AFReverseDependencyReconciliation -Configuration $reverseConfiguration -PreviousApps $previousApps -Journal $journal -JournalPath $journalPath
 
-          if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace) {
-            # Reconfirm the new app before touching previous versions.
-            Assert-AFClientPublishedApp `
-            -ApplicationRole $role `
-              -AppId $journal.AppId `
-              -ApplicationId $appId `
-              -Version $version `
-              -TimeoutSeconds 0 |
-            Out-Null
-
-            if ($configuration.unassign_previous_assignments) {
-              foreach ($previous in $previousApps) {
-                Remove-AFIntuneAppAssignments `
-                  -ApplicationRole $role `
-                  -Id ([guid]$previous.id) `
-                  -ApplicationId $appId `
-                  -Version ([string]$previous.displayVersion) `
-                  -ProtectedAppId $journal.AppId `
-                  -ErrorAction Stop |
-                Out-Null
+        $stage = "PreviousVersionCleanup"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace -and -not $inPlaceOperation) {
+          Assert-AFClientPublishedApp -ApplicationRole $role -AppId $journal.AppId -ApplicationId $appId -Version $version -TimeoutSeconds 0 | Out-Null
+          for ($index = 0; $index -lt $previousApps.Count; $index++) {
+            $previous = $previousApps[$index]
+            $delete = $index -ge $keepPrevious
+            if (-not $delete -and -not $configuration.unassign_previous_assignments) { continue }
+            try {
+              # References are checked before either detaching, unassigning, or deleting.
+              if ($delete) {
+                Clear-AFRetiringDependencies -Previous $previous -Configuration $configuration -Journal $journal -JournalPath $journalPath
+              } else {
+                Assert-AFDependencyCleanupSafe -Id ([guid]$previous.id)
               }
+              if ($configuration.unassign_previous_assignments) {
+                Remove-AFIntuneAppAssignments -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+              }
+              if ($delete) {
+                Remove-AFIntuneWin32App -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+              }
+            } catch {
+              # An ambiguous relationship write needs explicit resume, not a terminal retention result.
+              if (@($journal.DependencyOperations | Where-Object { $_.State -ne "Verified" }).Count) { throw }
+              $cleanupBlocked.Add([pscustomobject]@{AppId=[string]$previous.id; Reason=(Protect-AFNativeDiagnostic -Text $_.Exception.Message)})
+              $journal.CleanupBlocked = @($cleanupBlocked.ToArray())
+              Save-AFClientProcessJournal -Path $journalPath -Journal $journal
             }
-
-            for (
-              $index = $keepPrevious;
-              $index -lt $previousApps.Count;
-              $index++
-            ) {
-              $previous = $previousApps[$index]
-
-              Remove-AFIntuneWin32App `
-                -ApplicationRole $role `
-                -Id ([guid]$previous.id) `
-                -ApplicationId $appId `
-                -Version ([string]$previous.displayVersion) `
-                -ProtectedAppId $journal.AppId `
-                -ErrorAction Stop |
-              Out-Null
-            }
-          }        
-
+          }
         }
 
         $stage = "Complete"
@@ -841,7 +871,8 @@ function Start-AFClientProcess {
             Application = $appName
               Role        = $role
             Version     = $version
-            State       = "Complete"
+            State       = if ($cleanupBlocked.Count) { "PublishedCleanupBlocked" } elseif ($reconciliationOnly) { "DependenciesReconciled" } else { "Complete" }
+            CleanupBlocked = @($cleanupBlocked.ToArray())
             AppId       = [string]$journal.AppId
             JournalPath = $journalPath
             Operation   = [string]$journal.Operation

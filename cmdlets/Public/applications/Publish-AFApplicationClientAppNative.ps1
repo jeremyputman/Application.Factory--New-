@@ -249,8 +249,18 @@ function Publish-AFApplicationClientAppNative {
 
     # Ownership lines are reserved for AppFactory.
     $notes = ([string]$data.Information.Notes -split '\r?\n' |
-      Where-Object { $_ -notmatch '^\s*AppFactory(?:ID|Role):' }) -join "`n"
+      Where-Object { $_ -notmatch '^\s*AppFactory(?:ID|Role|Config|Client|Dependencies):' }) -join "`n"
     $notes += "`nAppFactoryID:$($application.id)`nAppFactoryRole:$role"
+
+    if ($Configuration.id) {
+      $notes += [Environment]::NewLine + "AppFactoryConfig:$($Configuration.id)" + [Environment]::NewLine + "AppFactoryClient:$script:client_id"
+    }
+    if ($ExistingAppId) {
+      $existingDependencyApp = Invoke-AFNativeGraphRequest -Method GET -Uri "deviceAppManagement/mobileApps/$ExistingAppId"
+      Assert-AFDependencyScope -App $existingDependencyApp -Configuration $Configuration
+      $preservedManifest = Get-AFDependencyManifest -Notes ([string]$existingDependencyApp.notes)
+      if ($preservedManifest) { $notes = New-AFDependencyNotes -Notes $notes -Manifest $preservedManifest }
+    }
 
     $body = @{
       "@odata.type"                  = "#microsoft.graph.win32LobApp"

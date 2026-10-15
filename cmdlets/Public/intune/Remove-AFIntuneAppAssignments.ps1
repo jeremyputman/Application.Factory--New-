@@ -20,6 +20,8 @@ function Remove-AFIntuneAppAssignments {
     return
   }
 
+  Assert-AFDependencyCleanupSafe -Id $Id
+
   if (-not $PSCmdlet.ShouldProcess(
       "$($app.displayName) [$Id]",
       "Remove application assignments"

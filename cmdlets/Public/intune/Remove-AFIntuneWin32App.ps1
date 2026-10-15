@@ -20,6 +20,8 @@ function Remove-AFIntuneWin32App {
     return
   }
 
+  Assert-AFDependencyCleanupSafe -Id $Id
+
   if (-not $PSCmdlet.ShouldProcess(
       "$($app.displayName) [$Id]",
       "Delete Intune Win32 application"
@@ -31,6 +33,7 @@ function Remove-AFIntuneWin32App {
   $writeFailure = ""
 
   try {
+    Assert-AFDependencyCleanupSafe -Id $Id
     Invoke-AFNativeGraphRequest `
       -Method DELETE `
       -Uri $uri | Out-Null

@@ -23,6 +23,8 @@ function New-AFClientRoleConfigurations {
         ConvertFrom-Json -DateKind String
       $copy | Add-Member -NotePropertyName PublicationRole -NotePropertyValue $role -Force
       if ($role -eq "updater") {
+        $copy | Add-Member -NotePropertyName dependencies -NotePropertyValue @() -Force
+        $copy | Add-Member -NotePropertyName reconcile_reverse_dependencies -NotePropertyValue $false -Force
         foreach ($field in @(
             "assignment_available", "assignment_available_exceptions",
             "assignment_required_exceptions", "assignment_uninstall",

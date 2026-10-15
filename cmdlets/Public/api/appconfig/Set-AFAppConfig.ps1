@@ -49,6 +49,10 @@
     existing setting.    
 .PARAMETER create_updater_app
     Publish a separate updater assigned Required to All devices.
+.PARAMETER dependencies
+    Dependency objects with application_id, dependency_type, version_policy, and version.
+.PARAMETER reconcile_reverse_dependencies
+    Move managed following references to verified replacement versions.
 .OUTPUTS
     The response from the API call.
 .EXAMPLE
@@ -68,6 +72,8 @@ function Set-AFAppConfig {
     [Alias("assignmentUninstallExceptions")][Parameter()][string[]]$assignment_uninstall_exceptions,
     [Parameter()][bool]$enabled = $false,
     [Parameter()][bool]$create_updater_app,
+    [Parameter()][AllowEmptyCollection()][object[]]$dependencies,
+    [Parameter()][bool]$reconcile_reverse_dependencies,
     [Alias("downloadForeground")][Parameter()][bool]$download_foreground = $false,
     [Alias("keepPreviousVersions")][Parameter()][int]$keep_previous_versions = 0,
     [Alias("copyPreviousAssignments")][Parameter()][bool]$copy_previous_assignments = $false,
@@ -91,7 +97,7 @@ function Set-AFAppConfig {
   $body.Remove("id") | Out-Null
   # Attempt to send the API request
   try {
-    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -ContentType "application/json" -body $($body | ConvertTo-JSON -Depth 5) -Method Patch
+    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -ContentType "application/json" -body $($body | ConvertTo-JSON -Depth 15) -Method Patch
     return $response
   }
   catch {

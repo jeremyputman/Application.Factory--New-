@@ -7,42 +7,7 @@ function Get-AFClientAssignmentPlan {
     [string]$SeedAppId
   )
 
-  $filters = @{}
   $rows = @{}
-
-  if (-not [string]::IsNullOrWhiteSpace(
-      [string]$Configuration.filters
-    )) {
-    foreach ($entry in (
-        [string]$Configuration.filters -split "::"
-      )) {
-      $parts = @(
-        $entry -split ";" | ForEach-Object { $_.Trim() }
-      )
-
-      if (
-        $parts.Count -ne 3 -or
-        -not $parts[0] -or
-        -not $parts[1] -or
-        $parts[2] -notin @("include", "exclude")
-      ) {
-        throw "Invalid assignment filter entry: $entry"
-      }
-
-      if ($filters.ContainsKey($parts[0])) {
-        throw "Duplicate assignment filter for '$($parts[0])'."
-      }
-
-      $filter = Get-AFClientUniqueGraphObject `
-        -Resource "deviceManagement/assignmentFilters" `
-        -DisplayName $parts[1]
-
-      $filters[$parts[0]] = @{
-        Id   = [string]$filter.id
-        Type = $parts[2].ToLowerInvariant()
-      }
-    }
-  }
 
   $sourceId = $SeedAppId
 
@@ -65,39 +30,6 @@ function Get-AFClientAssignmentPlan {
         )
       )) {
       $body = ConvertTo-AFNativeAssignmentBody -Assignment $assignment
-      $type = ([string]$body.target.'@odata.type').TrimStart('#')
-      $targetName = ""
-
-      switch ($type) {
-        "microsoft.graph.groupAssignmentTarget" {
-          $group = Invoke-AFNativeGraphRequest `
-            -Method GET `
-            -Uri "groups/$($body.target.groupId)"
-
-          $targetName = [string]$group.displayName
-        }
-        "microsoft.graph.exclusionGroupAssignmentTarget" {
-          $group = Invoke-AFNativeGraphRequest `
-            -Method GET `
-            -Uri "groups/$($body.target.groupId)"
-
-          $targetName = [string]$group.displayName
-        }
-        "microsoft.graph.allDevicesAssignmentTarget" {
-          $targetName = "All Devices"
-        }
-        "microsoft.graph.allLicensedUsersAssignmentTarget" {
-          $targetName = "All Users"
-        }
-      }
-
-      if ($filters.ContainsKey($targetName)) {
-        $body.target.deviceAndAppManagementAssignmentFilterId =
-        $filters[$targetName].Id
-
-        $body.target.deviceAndAppManagementAssignmentFilterType =
-        $filters[$targetName].Type
-      }
 
       if (
         $Configuration.download_foreground -and
@@ -207,14 +139,6 @@ function Get-AFClientAssignmentPlan {
           }
         }
 
-        if ($filters.ContainsKey($name)) {
-          $body.target.deviceAndAppManagementAssignmentFilterId =
-          $filters[$name].Id
-
-          $body.target.deviceAndAppManagementAssignmentFilterType =
-          $filters[$name].Type
-        }
-
         if (
           $Configuration.download_foreground -and
           $null -ne $body.settings
@@ -228,10 +152,16 @@ function Get-AFClientAssignmentPlan {
     }
   }
 
-  $assignments = @(
+  $unfilteredAssignments = @(
     foreach ($key in @($rows.Keys | Sort-Object)) {
       $rows[$key]
     }
+  )
+
+  $assignments = @(
+    Set-AFClientAssignmentPlanFilters `
+      -Configuration $Configuration `
+      -Assignments $unfilteredAssignments
   )
 
   [PSCustomObject]@{

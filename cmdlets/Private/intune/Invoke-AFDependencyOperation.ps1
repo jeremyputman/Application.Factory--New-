@@ -19,7 +19,8 @@ function Invoke-AFDependencyOperation {
       throw 'Relationships changed concurrently; dependency mutation stopped.'
     }
     # Refresh every app, including unmanaged sources, before checking the graph.
-    $inventory=Get-AFDependencyInventory
+    $requiredIds=@([string]$Entry.SourceAppId)+@($Entry.DesiredRelationships | ForEach-Object { [string]$_.targetId })
+    $inventory=Get-AFDependencyInventory -RequiredAppIds $requiredIds
     Assert-AFDependencyGraph -Inventory $inventory -SourceId $Entry.SourceAppId -Desired $Entry.DesiredRelationships
     # Inventory can take time: compare the source again immediately before writing.
     $freshSource=Invoke-AFNativeGraphRequest -Method GET -Uri $uri
@@ -56,9 +57,12 @@ function Invoke-AFDependencyOperation {
       throw 'Notes changed concurrently after relationship verification.'
     }
     if ([string]$fresh.notes -cne $Entry.DesiredNotes) {
+      # Notes are supported in v1.0. The beta endpoint can reject an otherwise
+      # valid notes-only PATCH with ModelValidationFailure. Relationships and
+      # verification remain on beta; do not replay broader app metadata.
       $noteError=''
       try {
-        Invoke-AFNativeGraphRequest -Method PATCH -Uri $uri -Body @{ notes=$Entry.DesiredNotes } -MaxAttempts 1 | Out-Null
+        Invoke-AFNativeGraphRequest -Method PATCH -Uri ("https://graph.microsoft.com/v1.0/$uri") -Body @{ '@odata.type'='#microsoft.graph.win32LobApp'; notes=$Entry.DesiredNotes } -MaxAttempts 1 | Out-Null
       } catch { $noteError=$_.Exception.Message }
       $confirmed=Invoke-AFNativeGraphRequest -Method GET -Uri $uri
       if ([string]$confirmed.notes -cne $Entry.DesiredNotes) { throw "Dependency policy write unconfirmed. $noteError" }

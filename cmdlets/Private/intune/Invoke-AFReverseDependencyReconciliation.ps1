@@ -1,7 +1,7 @@
 function Invoke-AFReverseDependencyReconciliation {
   param($Configuration,[object[]]$PreviousApps,$Journal,[string]$JournalPath)
   if (-not $Configuration.reconcile_reverse_dependencies -or $Configuration.PublicationRole -eq 'updater') { return }
-  foreach ($entry in @($Journal.DependencyOperations | Where-Object { $_.State -ne 'Verified' })) {
+  foreach ($entry in @($Journal.DependencyOperations | Where-Object { $null -ne $_ -and $_.State -ne 'Verified' })) {
     Invoke-AFDependencyOperation -Entry $entry -Journal $Journal -JournalPath $JournalPath
   }
   foreach ($old in $PreviousApps) {

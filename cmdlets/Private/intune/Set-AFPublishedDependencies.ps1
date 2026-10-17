@@ -6,7 +6,7 @@ function Set-AFPublishedDependencies {
       throw 'Resolved dependency target changed after preflight.'
     }
   }
-  foreach ($entry in @($Journal.DependencyOperations | Where-Object { $_.State -ne 'Verified' })) {
+  foreach ($entry in @($Journal.DependencyOperations | Where-Object { $null -ne $_ -and $_.State -ne 'Verified' })) {
     Invoke-AFDependencyOperation -Entry $entry -Journal $Journal -JournalPath $JournalPath
   }
   $app=Invoke-AFNativeGraphRequest -Method GET -Uri "deviceAppManagement/mobileApps/$($Journal.AppId)"

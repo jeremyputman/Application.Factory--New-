@@ -5,11 +5,27 @@ function Get-AFClientUniqueGraphObject {
     [Parameter(Mandatory)][string]$DisplayName
   )
 
-  $escapedName = $DisplayName.Replace("'", "''")
-  $filter = [uri]::EscapeDataString("displayName eq '$escapedName'")
-  $items = @(
-    Get-AFClientGraphCollection -Uri "$Resource`?`$filter=$filter"
-  )
+  if ($Resource.Trim('/') -eq 'deviceManagement/assignmentFilters') {
+    # Read all pages, then match the name locally.
+    $items = @(
+      Get-AFClientGraphCollection -Uri 'deviceManagement/assignmentFilters' |
+      Where-Object {
+        [string]::Equals(
+          [string]$_.displayName,
+          $DisplayName,
+          [StringComparison]::OrdinalIgnoreCase
+        )
+      }
+    )
+  }
+  else {
+    $escapedName = $DisplayName.Replace("'", "''")
+    $filter = [uri]::EscapeDataString("displayName eq '$escapedName'")
+
+    $items = @(
+      Get-AFClientGraphCollection -Uri "$Resource`?`$filter=$filter"
+    )
+  }
 
   if ($items.Count -ne 1) {
     throw (

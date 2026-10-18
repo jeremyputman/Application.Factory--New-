@@ -432,10 +432,15 @@ function Start-AFClientProcess {
             -Configuration $configuration `
             -PreviousApps $previousApps
 
-          # Validate ESP names before app creation too.
+          # Validate every selected ESP before app creation.
           foreach ($espName in @(
-              [string]$configuration.esp_assignments -split "," |
-              ForEach-Object { $_.Trim() } |
+              $configuration.esp_assignments |
+              ForEach-Object {
+                if ($_ -isnot [string]) {
+                  throw "ESP assignments must contain profile names as strings."
+                }
+                $_.Trim()
+              } |
               Where-Object { $_ } |
               Select-Object -Unique
             )) {

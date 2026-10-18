@@ -11,8 +11,13 @@ function Set-AFApplicationClientESPAssignments {
   }
 
   $names = @(
-    [string]$configuration.esp_assignments -split "," |
-    ForEach-Object { $_.Trim() } |
+    $configuration.esp_assignments |
+    ForEach-Object {
+      if ($_ -isnot [string]) {
+        throw "ESP assignments must contain profile names as strings."
+      }
+      $_.Trim()
+    } |
     Where-Object { $_ } |
     Select-Object -Unique
   )

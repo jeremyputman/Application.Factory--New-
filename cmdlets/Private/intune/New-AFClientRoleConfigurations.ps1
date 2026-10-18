@@ -37,9 +37,8 @@ function New-AFClientRoleConfigurations {
           $copy | Add-Member -NotePropertyName $field -NotePropertyValue $false -Force
         }
         $copy | Add-Member -NotePropertyName unassign_previous_assignments -NotePropertyValue $true -Force
-        foreach ($field in @("esp_assignments", "filters")) {
-          $copy | Add-Member -NotePropertyName $field -NotePropertyValue "" -Force
-        }
+        $copy | Add-Member -NotePropertyName esp_assignments -NotePropertyValue @() -Force
+        $copy | Add-Member -NotePropertyName filters -NotePropertyValue "" -Force
         $copy | Add-Member -NotePropertyName assignment_filters -NotePropertyValue @() -Force
       }
       $copy

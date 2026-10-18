@@ -30,7 +30,7 @@
 .PARAMETER unassign_previous_assignments
     Boolean to unassign previous assignments. Default: $true
 .PARAMETER esp_assignments
-    ESP assignment profiles string.
+    Array of enrollment status page names.
 .PARAMETER filters
     Filter string for configuration.
 .PARAMETER interactive_install
@@ -75,7 +75,7 @@ function New-AFAppConfig {
     [Alias("keepPreviousVersions", "KeepPrevious")][Parameter()][int]$keep_previous_versions = 0,
     [Alias("copyPreviousAssignments", "CopyPrevious")][Parameter()][bool]$copy_previous_assignments = $false,
     [Alias("unassignPreviousAssignments", "UnassignPrevious")][Parameter()][bool]$unassign_previous_assignments = $true,
-    [Alias("espAssignments", "espprofiles")][Parameter()][string]$esp_assignments,
+    [Alias("espAssignments", "espprofiles")][Parameter()][AllowEmptyCollection()][string[]]$esp_assignments,
     [Parameter()][string]$filters,
     [Alias("interactiveInstall")][Parameter()][bool]$interactive_install = $false,
     [Alias("interactiveUninstall")][Parameter()][bool]$interactive_uninstall = $false,

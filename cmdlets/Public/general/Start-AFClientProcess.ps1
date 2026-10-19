@@ -89,7 +89,23 @@ function Start-AFClientProcess {
           Get-AFApplicationConfigurations @lookup -ErrorAction Stop
         )
 
+        Write-AFLogEntry `
+          -Message "[Application Factory] :: Found $($configurations.Count) application configurations." `
+          -Tag "Process" `
+          -ErrorAction Continue -WarningAction Continue
+        if ($configurations.Count -eq 0) {
+          Write-AFLogEntry `
+            -Message "[Application Factory] :: No applications found for processing." `
+            -Level Warning -Tag "Process" `
+            -ErrorAction Continue -WarningAction Continue
+        }
+
         if (-not $DownloadOnly -and $configurations.Count -gt 0) {
+          Write-AFLogEntry `
+            -Message "[Application Factory] :: Connecting to Intune and reading the application inventory." `
+            -Tag "Process" `
+            -ErrorAction Continue -WarningAction Continue
+
           Connect-AFIntuneGraph -Force
 
           $filter = [uri]::EscapeDataString(
@@ -110,6 +126,11 @@ function Start-AFClientProcess {
         if ($attempt -eq $attemptLimit) {
           throw
         }
+
+        Write-AFLogEntry `
+          -Message "Client setup failed; retrying read operations ($attempt/$attemptLimit). $(Protect-AFNativeDiagnostic -Text $_.Exception.Message)" `
+          -Level Warning -Tag "Process" `
+          -ErrorAction Continue -WarningAction Continue
 
         Write-Warning (
           "Client setup failed; retrying read operations " +
@@ -190,6 +211,18 @@ function Start-AFClientProcess {
           throw "Application ID, name, and version are required."
         }
 
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Starting client process for version $version." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
+        if ($Force) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Force flag is set." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+
         $modeProperty = $configuration.PSObject.Properties["replace_in_place"]
         if ($null -ne $modeProperty -and $null -ne $modeProperty.Value) {
           if ($modeProperty.Value -isnot [bool]) {
@@ -199,9 +232,19 @@ function Start-AFClientProcess {
         }
 
         if ($DownloadOnly) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Download-only mode: downloading package files." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
           Get-AFApplicationClientFiles `
             -configuration $configuration `
             -ErrorAction Stop
+
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Download-only process completed; upload and assignments skipped." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
 
           $results.Add([PSCustomObject]@{
               Application = $appName
@@ -518,6 +561,11 @@ function Start-AFClientProcess {
         }
 
         if ($reconcileExistingId) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Version $version already exists; reconciling dependencies without uploading content." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
           $journal.AppId = $reconcileExistingId
           $journal.AssignmentSnapshot = @($assignmentSnapshot)
           $ready = Assert-AFClientPublishedApp -ApplicationRole $role -AppId $reconcileExistingId -ApplicationId $appId -Version $version -TimeoutSeconds 0
@@ -528,6 +576,11 @@ function Start-AFClientProcess {
         }
         elseif ($ResumePublishedAppId) {
           $stage = "ValidateResumeApplication"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Validating published application $ResumePublishedAppId before resuming." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
 
           $published = Assert-AFClientPublishedApp `
             -ApplicationRole $role `
@@ -600,6 +653,11 @@ function Start-AFClientProcess {
         }
         else {
           $stage = "DownloadFiles"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Downloading and validating package files." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
 
           # Retry only before publishing begins.
           for (
@@ -643,12 +701,22 @@ function Start-AFClientProcess {
                 throw "The required detection script is missing."
               }
 
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Package files downloaded and validated." `
+                -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
+
               break
             }
             catch {
               if ($attempt -eq $attemptLimit) {
                 throw
               }
+
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Download failed; retrying ($attempt/$attemptLimit)." `
+                -Level Warning -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
 
               Write-Warning (
                 "Download failed for '$appName'; retrying " +
@@ -700,6 +768,11 @@ function Start-AFClientProcess {
               $publishParameters.ExpectedContentVersion =
               [string]$journal.OriginalContentVersionId
             }
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: Publishing version $version. Operation=$($journal.Operation); requested transport=$UploadTransport." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
+
             Publish-AFApplicationClientApp @publishParameters
           }
           finally {
@@ -743,6 +816,11 @@ function Start-AFClientProcess {
         }
 
         $stage = "ConfirmPublished"
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Confirming published application $($journal.AppId)." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
 
         $script:published_application = Assert-AFClientPublishedApp `
             -ApplicationRole $role `
@@ -760,22 +838,46 @@ function Start-AFClientProcess {
         $stage = "ApplyDependencies"
         $journal.Stage = $stage
         Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Applying and verifying dependency policy." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
         Set-AFPublishedDependencies -Configuration $configuration -Bindings $dependencyBindings -Journal $journal -JournalPath $journalPath
+
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Dependency policy verified." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
 
         if ($inPlaceOperation -and $role -eq "updater" -and -not $reconciliationOnly) {
           $stage = "ApplyUpdaterAssignments"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Applying and verifying updater assignments." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
           Set-AFApplicationClientGroups -configuration $configuration -Plan $plan -ErrorAction Stop | Out-Null
           Assert-AFClientAssignments -AppId $journal.AppId -Plan $plan
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Updater assignments verified." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
         }
         elseif ($inPlaceOperation -or $reconciliationOnly) {
           $stage = "VerifyPreservedAssignments"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Verifying preserved assignments." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
           Assert-AFClientAssignmentsUnchanged `
             -AppId ([guid]$journal.AppId) `
             -ExpectedAssignments $assignmentSnapshot
-          Write-Verbose (
-            "In-place replacement: assignment writes, ESP writes, " +
-            "and previous-application cleanup were skipped."
-          )
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Preserved assignments verified; assignment and ESP writes skipped." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
         }
         else {
           # Apply the exact native plan captured before publishing.
@@ -786,6 +888,11 @@ function Start-AFClientProcess {
           Save-AFClientProcessJournal `
             -Path $journalPath `
             -Journal $journal
+
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Applying assignment plan, including previous assignments when configured." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
 
           Set-AFApplicationClientGroups `
             -configuration $configuration `
@@ -799,13 +906,27 @@ function Start-AFClientProcess {
             -AppId $journal.AppId `
             -Plan $plan
 
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Assignment plan verified." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
           $stage = "ApplyESP"
 
           if ($configuration.esp_assignments) {
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: Applying and verifying ESP assignments." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
+
             Set-AFApplicationClientESPAssignments `
               -configuration $configuration `
               -ErrorAction Stop |
             Out-Null
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: ESP assignments verified." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
           }
 
         }
@@ -815,11 +936,35 @@ function Start-AFClientProcess {
         Save-AFClientProcessJournal -Path $journalPath -Journal $journal
         $reverseConfiguration = $configuration.PSObject.Copy()
         $reverseConfiguration | Add-Member -NotePropertyName reconcile_reverse_dependencies -NotePropertyValue ([bool]$journal.ReconcileReverseDependencies) -Force
+        if ($reverseConfiguration.reconcile_reverse_dependencies -and $role -eq "normal") {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Reconciling previous dependency references." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Reverse dependency reconciliation is disabled for this publication." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
         Invoke-AFReverseDependencyReconciliation -Configuration $reverseConfiguration -PreviousApps $previousApps -Journal $journal -JournalPath $journalPath
 
         $stage = "PreviousVersionCleanup"
         $journal.Stage = $stage
         Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        if ($SkipPreviousVersionCleanup -or $replaceInPlace -or $inPlaceOperation) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Previous-version cleanup skipped by the selected publishing mode." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Checking $($previousApps.Count) previous applications; retaining $keepPrevious previous versions." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
         if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace -and -not $inPlaceOperation) {
           Assert-AFClientPublishedApp -ApplicationRole $role -AppId $journal.AppId -ApplicationId $appId -Version $version -TimeoutSeconds 0 | Out-Null
           for ($index = 0; $index -lt $previousApps.Count; $index++) {
@@ -835,15 +980,28 @@ function Start-AFClientProcess {
               }
               if ($configuration.unassign_previous_assignments) {
                 Remove-AFIntuneAppAssignments -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+                Write-AFLogEntry `
+                  -Message "[$appName][$role] :: Confirmed previous application $($previous.id) has no assignments." `
+                  -Tag "Process", $appName `
+                  -ErrorAction Continue -WarningAction Continue
               }
               if ($delete) {
                 Remove-AFIntuneWin32App -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+                Write-AFLogEntry `
+                  -Message "[$appName][$role] :: Confirmed previous application $($previous.id) is absent." `
+                  -Tag "Process", $appName `
+                  -ErrorAction Continue -WarningAction Continue
               }
             } catch {
               # An ambiguous relationship write needs explicit resume, not a terminal retention result.
               if (@($journal.DependencyOperations | Where-Object { $_.State -ne "Verified" }).Count) { throw }
               $cleanupBlocked.Add([pscustomobject]@{AppId=[string]$previous.id; Reason=(Protect-AFNativeDiagnostic -Text $_.Exception.Message)})
               $journal.CleanupBlocked = @($cleanupBlocked.ToArray())
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Previous application $($previous.id) retained. $($cleanupBlocked[$cleanupBlocked.Count - 1].Reason)" `
+                -Level Warning -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
+
               Save-AFClientProcessJournal -Path $journalPath -Journal $journal
             }
           }
@@ -883,9 +1041,24 @@ function Start-AFClientProcess {
             Operation   = [string]$journal.Operation
           })
 
-        Write-AFLogEntry `
-          -Message "[$appName] :: Client process completed for version $version." `
-          -Tag "Process", $appName
+        if ($cleanupBlocked.Count -gt 0) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Publication processed for version $version; cleanup blocked for $($cleanupBlocked.Count) previous applications. Journal=$journalPath" `
+            -Level Warning -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        elseif ($reconciliationOnly) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Dependencies reconciled for existing version $version. AppId=$($journal.AppId)" `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Client process completed for version $version. AppId=$($journal.AppId)" `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
       }
       catch {
         $failureText = Protect-AFNativeDiagnostic `
@@ -959,6 +1132,11 @@ function Start-AFClientProcess {
             Error       = $failureText
           })
 
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Failed at '$stage'. AppId=$resultAppId; Journal=$journalPath. $failureText" `
+          -Level Error -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
         Write-Warning (
           "[$appName] failed at '$stage'. " +
           "No automatic republication or failed-app deletion " +
@@ -991,3 +1169,4 @@ function Start-AFClientProcess {
     }
   }
 }
+

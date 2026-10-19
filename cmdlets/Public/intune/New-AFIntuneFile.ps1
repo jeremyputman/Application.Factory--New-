@@ -31,9 +31,19 @@ function New-AFIntuneFile {
     Wait              = $true
   }
   # Start packaging process and handle output
+  Write-AFLogEntry `
+    -Message "[$($application.Information.Name)] :: Starting Intune package creation utility." `
+    -Tag "Applications", ([string]$application.Information.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   $process = Start-Process @param
   if ($process.ExitCode -eq 0) {
     Rename-Item -path $OutputPackage -NewName "$($application.Information.Name).intunewin" -Force
+    Write-AFLogEntry `
+      -Message "[$($application.Information.Name)] :: Intune package created." `
+      -Tag "Applications", ([string]$application.Information.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
   }
   else {
     throw "Process failed with exit code $($process.ExitCode)"

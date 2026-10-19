@@ -33,6 +33,11 @@ function New-AFApplicationPackage {
   catch {
     throw "[$($application.Information.Name)] Failed to create '$($AppPublishFolderPath)' with error message: $($_.Exception.Message)"
   }
+  Write-AFLogEntry `
+    -Message "[$($application.Information.Name)] :: Copying deployment toolkit template files." `
+    -Tag "Applications", ([string]$application.Information.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   try {
     # Copy PSADT template files
     Copy-Item -Path "$($PSScriptRoot)\Templates\PSADT\*" -Destination $AppPublishFolderPath -Recurse -Force -Confirm:$false
@@ -54,6 +59,11 @@ function New-AFApplicationPackage {
   if ($application.Program.InstallExperience -eq "User") {
     $requireAdmin = $false
   }
+  Write-AFLogEntry `
+    -Message "[$($application.Information.Name)] :: Preparing deployment script and application metadata." `
+    -Tag "Applications", ([string]$application.Information.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   # Customize toolkit script with application metadata
   $ToolkitContent = Get-Content -Path $ToolkitFile -Raw
   $ToolkitContent = $ToolkitContent -replace "###INTUNEAPPNAME###", $application.Information.Name
@@ -102,6 +112,11 @@ function New-AFApplicationPackage {
   # Download application icon
   $iconPath = Join-Path -Path $AppPublishFolderPath -ChildPath "Icon.png"
   Invoke-WebRequest -Uri $application.IconURL -OutFile $iconPath -ErrorAction SilentlyContinue
+  Write-AFLogEntry `
+    -Message "[$($application.Information.Name)] :: Preparing detection assets." `
+    -Tag "Applications", ([string]$application.Information.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   # Prepare detection script if required
   if($application.DetectionRule.Type -eq "Script"){
     $detection_script = Join-Path -Path $AppPublishFolderPath -ChildPath "detection.ps1"

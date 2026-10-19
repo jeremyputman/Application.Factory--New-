@@ -88,6 +88,11 @@ function Invoke-AFNativeGraphRequest {
             $failure.Status, $attempt, $MaxAttempts, $delay
           )
 
+          Write-AFLogEntry `
+            -Message "Graph HTTP $($failure.Status); attempt $attempt/$MaxAttempts; retry in $($delay)s." `
+            -Level Warning -Tag "Graph", "Retry" `
+            -ErrorAction Continue -WarningAction Continue
+
           Start-Sleep -Seconds $delay
           continue
         }

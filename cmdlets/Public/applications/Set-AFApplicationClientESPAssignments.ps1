@@ -68,5 +68,11 @@ function Set-AFApplicationClientESPAssignments {
     if ($appId -notin @($confirmed.selectedMobileAppIds)) {
       throw "ESP '$name' did not retain application $appId."
     }
+
+    Write-AFLogEntry `
+      -Message "[$($configuration.application.Name)] :: ESP '$name' verified for application $appId." `
+      -Tag "ESP", ([string]$configuration.application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
   }
 }

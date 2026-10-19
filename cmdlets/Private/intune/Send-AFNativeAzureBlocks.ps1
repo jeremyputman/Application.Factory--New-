@@ -20,6 +20,7 @@ function Send-AFNativeAzureBlocks {
     $ids = [Collections.Generic.List[string]]::new()
     $prefix = [guid]::NewGuid().ToString("N")
     $index = 0
+    $lastLoggedPercent = 0
 
     while ($stream.Position -lt $stream.Length) {
       $count = 0
@@ -68,6 +69,15 @@ function Send-AFNativeAzureBlocks {
 
       $ids.Add($blockId)
       $index++
+
+      $percent = [int][Math]::Floor(100.0 * $stream.Position / $stream.Length)
+      if ($percent -ge ($lastLoggedPercent + 10) -or $percent -eq 100) {
+        Write-AFLogEntry `
+          -Message "Native content transfer: $percent% ($($stream.Position)/$($stream.Length) bytes sent)." `
+          -Tag "Upload" `
+          -ErrorAction Continue -WarningAction Continue
+        $lastLoggedPercent = $percent
+      }
 
       Write-Verbose (
         "Uploaded block {0}/{1}; {2}/{3} bytes." -f

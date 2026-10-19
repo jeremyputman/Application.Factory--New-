@@ -35,6 +35,11 @@ function Set-AFApplicationClientGroups {
       -SeedAppId $publishedId
   }
 
+  Write-AFLogEntry `
+    -Message "[$($configuration.application.Name)][$role] :: Applying $(@($Plan.Assignments).Count) planned assignments to $publishedId." `
+    -Tag "Groups", ([string]$configuration.application.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   foreach ($assignment in @($Plan.Assignments)) {
     Set-AFNativeAppAssignment `
       -AppId $publishedId `
@@ -44,4 +49,9 @@ function Set-AFApplicationClientGroups {
   Assert-AFClientAssignments `
     -AppId $publishedId `
     -Plan $Plan
+
+  Write-AFLogEntry `
+    -Message "[$($configuration.application.Name)][$role] :: Assignment plan verified for $publishedId." `
+    -Tag "Groups", ([string]$configuration.application.Name) `
+    -ErrorAction Continue -WarningAction Continue
 }

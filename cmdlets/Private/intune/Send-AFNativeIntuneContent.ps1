@@ -46,9 +46,18 @@ function Send-AFNativeIntuneContent {
     -not $azCopyAvailable
   ) {
     Write-Verbose "AzCopy is unavailable; Auto selected native upload."
+    Write-AFLogEntry `
+      -Message "AzCopy is unavailable; Auto selected native upload." `
+      -Tag "Upload" `
+      -ErrorAction Continue -WarningAction Continue
+
   }
 
   if ($tryAzCopy) {
+    Write-AFLogEntry `
+      -Message "Uploading $length encrypted bytes using AzCopy." `
+      -Tag "Upload" `
+      -ErrorAction Continue -WarningAction Continue
     $complete = Invoke-AFNativeAzCopy `
       -Context $Context `
       -PayloadPath $PayloadPath `
@@ -67,7 +76,17 @@ function Send-AFNativeIntuneContent {
       -InitializeBlob
 
     Write-Verbose "Partial Azure upload cleared; starting native fallback."
+    Write-AFLogEntry `
+      -Message "Partial Azure upload cleared; starting native fallback." `
+      -Tag "Upload" `
+      -ErrorAction Continue -WarningAction Continue
+
   }
+
+  Write-AFLogEntry `
+    -Message "Uploading $length encrypted bytes using native block transfer." `
+    -Tag "Upload" `
+    -ErrorAction Continue -WarningAction Continue
 
   Send-AFNativeAzureBlocks `
     -Context $Context `

@@ -76,6 +76,11 @@ function Publish-AFApplicationClientAppNative {
   $context = $null
 
   try {
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Opening and validating the Intune package." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
     $package = Get-AFNativeIntunePackage `
       -FilePath $packagePath `
       -WorkDirectory $workDirectory
@@ -396,6 +401,11 @@ function Publish-AFApplicationClientAppNative {
       $status.AppId = [string]([guid]$ExistingAppId)
       Save-AFNativePublishCheckpoint -Status $status
 
+      Write-AFLogEntry `
+        -Message "[$($application.Name)][$role] :: Validating existing application $ExistingAppId for content replacement." `
+        -Tag "Applications", ([string]$application.Name) `
+        -ErrorAction Continue -WarningAction Continue
+
       $app = Get-AFNativeManagedApp `
         -ApplicationRole $role `
         -Id ([guid]$ExistingAppId) `
@@ -416,6 +426,11 @@ function Publish-AFApplicationClientAppNative {
     }
     else {
       $status.Stage = "CreateApplication"
+      Write-AFLogEntry `
+        -Message "[$($application.Name)][$role] :: Creating the Intune application." `
+        -Tag "Applications", ([string]$application.Name) `
+        -ErrorAction Continue -WarningAction Continue
+
       $app = Invoke-AFNativeGraphRequest `
         -Method POST `
         -Uri "deviceAppManagement/mobileApps" `
@@ -431,6 +446,11 @@ function Publish-AFApplicationClientAppNative {
     $contentRoot = "$appUri/microsoft.graph.win32LobApp/contentVersions"
 
     $status.Stage = "CreateContentVersion"
+
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Creating the content version." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
 
     $version = Invoke-AFNativeGraphRequest `
       -Method POST `
@@ -469,6 +489,11 @@ function Publish-AFApplicationClientAppNative {
 
     $status.Stage = "AzureStorageUriRequest"
 
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Waiting for Intune to prepare upload storage." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
     $file = Wait-AFNativeContentFile `
       -FileUri $fileUri `
       -Stage AzureStorageUriRequest `
@@ -488,6 +513,11 @@ function Publish-AFApplicationClientAppNative {
     $status.Stage = "UploadContent"
     Save-AFNativePublishCheckpoint -Status $status
 
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Uploading $($package.SizeEncrypted) encrypted bytes; requested transport=$UploadTransport." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
     Send-AFNativeIntuneContent `
       -Context $context `
       -PayloadPath $package.PayloadPath `
@@ -495,9 +525,19 @@ function Publish-AFApplicationClientAppNative {
       -AzCopyPath $AzCopyPath `
       -DiagnosticsDirectory $diagnosticsDirectory
 
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Content transfer completed using $($context.TransportUsed)." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
     $status.TransportUsed = $context.TransportUsed
     $status.Renewals = $context.Renewals
     $status.AzCopyJobId = $context.AzCopyJobId
+
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Committing uploaded content and waiting for Intune verification." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
 
     $status.Stage = "CommitFile"
     $commitResponseIssue = ""
@@ -580,6 +620,11 @@ function Publish-AFApplicationClientAppNative {
     }
 
     Save-AFNativePublishCheckpoint -Status $status
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Activating the verified content version." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
     Invoke-AFNativeGraphRequest `
       -Method PATCH `
       -Uri $appUri `
@@ -591,6 +636,11 @@ function Publish-AFApplicationClientAppNative {
     )
 
     $lastApp = $null
+
+    Write-AFLogEntry `
+      -Message "[$($application.Name)][$role] :: Waiting for Intune publication and validating application metadata." `
+      -Tag "Applications", ([string]$application.Name) `
+      -ErrorAction Continue -WarningAction Continue
 
     while ([DateTimeOffset]::UtcNow -lt $publishDeadline) {
       $lastApp = Invoke-AFNativeGraphRequest `
@@ -663,6 +713,11 @@ function Publish-AFApplicationClientAppNative {
           -Force `
           -ErrorAction SilentlyContinue
 
+        Write-AFLogEntry `
+          -Message "[$($application.Name)][$role] :: Published and verified version $script:published_version in Intune. AppId=$($lastApp.id)" `
+          -Tag "Applications", ([string]$application.Name) `
+          -ErrorAction Continue -WarningAction Continue
+
         return $lastApp
       }
 
@@ -702,3 +757,4 @@ function Publish-AFApplicationClientAppNative {
     $status.ElapsedSeconds = $stopwatch.Elapsed.TotalSeconds
   }
 }
+

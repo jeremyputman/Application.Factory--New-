@@ -5,6 +5,7 @@
 - Allow version in file name or not. User config
 - Proper handling of arm64 vs x64 apps
 - Improved filter functionality
+- MAJOR CHANGE: You will need to download a copy of AzCopy for it to still use AzCopy
 
 # 0.1.15
 - Added a check if ArgumentList is empty

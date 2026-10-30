@@ -1,50 +1,70 @@
 function Get-AFIntuneWin32App {
-  [cmdletbinding(DefaultParameterSetName = 'All')]
+  [CmdletBinding(DefaultParameterSetName = "All")]
   param(
-    [Parameter(Mandatory = $true, ParameterSetName = 'id')][ValidateNotNullOrEmpty()][string]$id,
-    [Parameter(Mandatory = $true, ParameterSetName = 'displayName')][ValidateNotNullOrEmpty()][string]$displayName,
-    [Parameter()][switch]$failed
+    [Parameter(Mandatory = $true, ParameterSetName = "Id")]
+    [ValidateNotNullOrEmpty()][string]$Id,
+    [Parameter(Mandatory = $true, ParameterSetName = "DisplayName")][ValidateNotNullOrEmpty()][string]$DisplayName,
+    [Parameter()][switch]$Failed
   )
-  # URI Endpoint
-  $endpoint = "deviceAppManagement/mobileApps"
-  # Build filters for URI
-  $filters =  [System.Collections.Generic.List[PSCustomObject]]@()
-  $filters.Add("isof('microsoft.graph.win32LobApp')") | Out-Null
-  $filters.Add("contains(notes,'AppFactoryID')") | Out-Null
-  if($id){
-    $filters.Add("id eq '$($id)'") | Out-Null
+
+  $filters = [System.Collections.Generic.List[string]]::new()
+  $filters.Add("isof('microsoft.graph.win32LobApp')")
+  $filters.Add("contains(notes,'AppFactoryID:')")
+
+  if ($PSBoundParameters.ContainsKey("Id")) {
+    $escapedId = $Id.Replace("'", "''")
+    $filters.Add("id eq '$escapedId'")
   }
-  if($displayName){
-    $filters.Add("displayName eq '$($displayName)'") | Out-Null
-  }   
-  if($failed.IsPresent){
-    $filters.Add("uploadState eq 0") | Out-Null
+
+  if ($PSBoundParameters.ContainsKey("DisplayName")) {
+    $escapedDisplayName = $DisplayName.Replace("'", "''")
+    $filters.Add("contains(displayName,'$escapedDisplayName')")
   }
-  # Create query string for the filter
-  $filterList = $filters -join " and "
-  $endpoint = "$($endpoint)?`$filter=$($filterList)"
-  # Create empty list
-  $applicationList =  [System.Collections.Generic.List[PSCustomObject]]@()  
-  # Graph Header
-  $headers = @{
-    Authorization = $Global:AuthenticationHeader.Authorization
-    "Content-Type" = "application/json"
-  }  
-  try{
-    $uri = "https://graph.microsoft.com/beta/$($endpoint)"
-    do{
-      $results = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -StatusCodeVariable statusCode
-      if($results.value){
-        foreach($item in $results.value){
-          $applicationList.add($item)
-        }
+
+  if ($Failed.IsPresent) {
+    # Keep failed-state filtering local because Intune's app-level
+    # upload state representation has changed over time.
+    # This also lets us recognize more than one failure state.
+  }
+
+  $filter = $filters -join " and "
+  $encodedFilter = [System.Uri]::EscapeDataString($filter)
+  $uri = "deviceAppManagement/mobileApps?`$filter=$encodedFilter"
+  $applications = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+  try {
+    do {
+      $response = Invoke-AFGraphRequest `
+        -Method GET `
+        -Uri $uri `
+        -ApiVersion beta
+
+      foreach ($item in @($response.value)) {
+        $applications.Add($item)
       }
-      $uri = $results."@odata.nextLink"
-    }while($null -ne $results."@odata.nextLink")
+
+      $uri = $response.'@odata.nextLink'
+    }
+    while ($uri)
+
+    if ($Failed.IsPresent) {
+      return @(
+        $applications |
+        Where-Object {
+          $_.uploadState -in @(
+            0,
+            "error",
+            "transientError",
+            "commitFileFailed",
+            "commitFileTimedOut"
+          )
+        }
+      )
+    }
+
+    return @($applications)
   }
-  catch{
-    throw "Unable to get devices. $($_.Exception.Message)"
-  }  
-  return $applicationList
-  
+  catch {
+    throw "Unable to retrieve Intune Win32 applications. $($_.Exception.Message)"
+  }
 }

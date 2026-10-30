@@ -130,6 +130,11 @@ function Publish-AFApplication {
     }
     # Update application version after upload
     Add-AFApplicationVersion -id $application.id -versions $CurrentVersion.version | Out-Null
+    Write-AFLogEntry `
+      -Message "[$($application.Information.Name)] :: Registered version $($CurrentVersion.version) after uploading to $container." `
+      -Tag "Applications", ([string]$application.Information.Name) `
+      -ErrorAction Continue -WarningAction Continue
+
   }
   # Handle ECNO-specific metadata and update
   $params = @{}
@@ -160,7 +165,13 @@ function Publish-AFApplication {
     }
   }
   Set-AFApplication -id $application.id -lastupdate (Get-Date) @params | Out-Null
+  Write-AFLogEntry `
+    -Message "[$($application.Information.Name)] :: Application publication metadata updated." `
+    -Tag "Applications", ([string]$application.Information.Name) `
+    -ErrorAction Continue -WarningAction Continue
+
   # Clean up local publish and setup folders
   Remove-Item -Path $AppPublishFolderPath -Recurse -Force | Out-Null
   Remove-Item -Path $AppSetupFolderPath -Recurse -Force | Out-Null
 }
+

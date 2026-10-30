@@ -49,6 +49,11 @@ function Import-AFECNOApp {
   }
   # Retrieve ECNO app details and download files
   Write-AFLogEntry -Message "[<c='green'>$($application.Information.DisplayName)</c>] :: Starting Package" -Tag "Process", $application.Information.DisplayName
+  Write-AFLogEntry `
+    -Message "[$applicationName] :: Reading ECNO application metadata." `
+    -Tag "Process", $applicationName `
+    -ErrorAction Continue -WarningAction Continue
+
   $details = Get-AppFactoryECNOAppItem -application $application
   $AppSetupFolderPath = Join-Path -Path $script:working_folder -ChildPath "Installers" -AdditionalChildPath $applicationName
   # Create path if it doesn't exist
@@ -60,6 +65,11 @@ function Import-AFECNOApp {
       throw "[$($application.Information.DisplayName)] Failed to create '$($Path)' with error message: $($_.Exception.Message)"
     }
   }
+  Write-AFLogEntry `
+    -Message "[$applicationName] :: Downloading ECNO source files." `
+    -Tag "Process", $applicationName `
+    -ErrorAction Continue -WarningAction Continue
+
   Get-AppFactoryECNOFile -Application $Application -version $details -destination $AppSetupFolderPath
   # Read the config file to get details
   $configFile = Join-Path -Path $AppSetupFolderPath -ChildPath "_win32app.txt"
@@ -98,7 +108,17 @@ function Import-AFECNOApp {
     architecture = $architecture
   }
   # Create new application and set icon
+  Write-AFLogEntry `
+    -Message "[$applicationName] :: Creating the AppFactory application." `
+    -Tag "Process", $applicationName `
+    -ErrorAction Continue -WarningAction Continue
+
   $response = New-AFApplication @new
+  Write-AFLogEntry `
+    -Message "[$applicationName] :: Setting the application icon." `
+    -Tag "Process", $applicationName `
+    -ErrorAction Continue -WarningAction Continue
+
   Set-AFApplicationIcon -id $response.id -iconpath $icon.FullName | Out-Null
   Remove-Item -Path $AppSetupFolderPath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
   Write-AFLogEntry -Message "[<c='green'>$($application.Information.DisplayName)</c>] :: Completed Package" -Tag "Process", $application.Information.DisplayName

@@ -1,154 +1,1172 @@
 function Start-AFClientProcess {
-  [cmdletbinding()]
+  [CmdletBinding()]
   param(
-    [Parameter(Mandatory = $true)][string]$configFile,
-    [Parameter(Mandatory = $true)][string]$workspace,
-    [Parameter()][string]$application_name,
-    [Parameter()][switch]$EnableLogging,
-    [Parameter()][string]$LogLevel = "Verbose",
-    [Parameter()][switch]$Force,
-    [Parameter()][switch]$DownloadOnly
-  )
-  # Set Application Factory API settings
-  $params = @{
-    configFile    = $configFile
-    EnableLogging = $EnableLogging.IsPresent
-    LogLevel      = $LogLevel
-    Workspace     = $workspace
-  }  
-  $script:log_target = "Application Factory Client"
-  Set-AFClientSettings @params
-  # Get current list of applications
+    [Parameter(Mandatory)][string]$configFile,
+    [Parameter(Mandatory)][string]$workspace,
+    [string]$application_name,
+    [switch]$EnableLogging,
+    [string]$LogLevel = "Verbose",
+    [switch]$Force,
+    [switch]$DownloadOnly,
 
-  for ($tries = 0; $tries -lt $script:retries; $tries++) {
-    $err = $false
+    [switch]$UseNativeUpload = $true,
+    [ValidateSet("Auto", "Native", "AzCopy")][string]$UploadTransport = "Auto",
+    [string]$AzCopyPath,
+
+    [switch]$SkipPreviousVersionCleanup,
+    [string]$ResumePublishedAppId
+  )
+
+  $ErrorActionPreference = "Stop"
+
+  if (-not $UseNativeUpload) {
+    throw (
+      "The legacy IntuneWin32App publishing route has been retired. " +
+      "Omit UseNativeUpload or specify -UseNativeUpload."
+    )
+  }
+
+  if (
+    $PSVersionTable.PSVersion -lt [version]"7.5" -or
+    -not $IsWindows
+  ) {
+    throw "Client publishing requires PowerShell 7.5 or newer on Windows."
+  }  
+
+  if (
+    $ResumePublishedAppId -and
+    ($Force -or $DownloadOnly)
+  ) {
+    throw "ResumePublishedAppId cannot be combined with Force or DownloadOnly."
+  }
+
+  $script:log_target = "Application Factory Client"
+
+  Set-AFClientSettings `
+    -configFile $configFile `
+    -Workspace $workspace `
+    -EnableLogging:$EnableLogging `
+    -LogLevel $LogLevel
+
+  [IO.Directory]::CreateDirectory($script:working_folder) | Out-Null
+
+  # Prevent overlapping client processes using this working folder.
+  $lockPath = Join-Path $script:working_folder "client-process.lock"
+  $processLock = $null
+  $results = [Collections.Generic.List[object]]::new()
+
+  try {
     try {
-      $params = @{
-        id = $script:client_id
-      }
-      if($application_name){
-        $params.application_id = $application_name
-      }
-      $configurations = Get-AFApplicationConfigurations @params
-      Write-AFLogEntry -Message "[Application Factory] :: There are <c='green'>$($configurations.count)</c> applications configured in AppFactory"  -Tag "Process"
-      if($configurations.count -eq 0){
-        Write-AFLogEntry -Message "[Application Factory] :: No applications found for processing."  -Level  "Warning" -Tag "Process"
-        return
-      }
-      Write-AFLogEntry -Message "[Application Factory] :: Getting Current Intune Application List." -Tag "Process"
-      Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
-      $app_params = @{}
-      if($application_name){
-        $app_params.DisplayName = "$($script:app_prefix)$($application_name)*"
-      }
-      elseif($script:app_prefix){
-        $app_params.DisplayName = "$($script:app_prefix)*"
-      }
-      $intune_apps = Get-AFIntuneWin32App @app_params
-      foreach($configuration in $configurations){
-        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Starting Process" -Tag "Process", $configuration.application.Name
-        # Determine what version we should be looking for
-        if($configuration.application.latest_version.raw_version){
-          $script:published_version = $configuration.application.latest_version.raw_version
-        }
-        else{
-          $script:published_version = $configuration.version.raw_version
-        }
-        $current_deployed = $intune_apps | Where-Object {$_.Notes -match "AppFactoryID:$($configuration.application.id)"} | Sort-Object createdDateTime -descending
-        if($current_deployed -and $current_deployed.displayversion -eq $script:published_version -and -not $Force.IsPresent){
-          Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Application with version $($script:published_version) already exists in Intune. Skipping deployment." -Level "Warning" -Tag "Process", $configuration.application.Name
-        }
-        else{
-          if ($Force.IsPresent) {
-            Write-AFLogEntry  -Message "[<c='green'>$($configuration.application.Name)</c>] :: <c='yellow'>Force flag</c> is set " -Tag "Process", $configuration.application.Name
-          }          
-          try{
-            Get-AFApplicationClientFiles -configuration $configuration
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Downloaded files." -Tag "Applications", "$($configuration.application.Name)"
-            if($DownloadOnly.IsPresent){
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: <c='yellow'>Download only flag</c> is set. Skipping upload and assignment." -Level "Warning" -Tag "Process", $configuration.application.Name
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", $configuration.application.Name
-              continue
-            }
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Creating Intune File." -Tag "Applications", "$($configuration.application.Name)"
-            Publish-AFApplicationClientApp -configuration $configuration
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Created Intune File." -Tag "Applications", "$($configuration.application.Name)"
-            if($configuration.copy_previous_assignments -and $current_deployed.count -gt 0){
-              Copy-AFApplicationClientGroups -intune_apps $current_deployed
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Copied group assignments." -Tag "Applications", "$($configuration.application.Name)"
-            }
-            Set-AFApplicationClientGroups -configuration $configuration
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Set group assignments." -Tag "Applications", "$($configuration.application.Name)"
-            if($configuration.esp_assignments){
-              Set-AFApplicationClientESPAssignments -configuration $configuration
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Added ESP assignments." -Tag "Applications", "$($configuration.application.Name)"
-            }
-            if($configuration.unassign_previous_assignments){
-              foreach($app in $current_deployed){
-                $originalWarningPreference = $WarningPreference
-                $WarningPreference = 'SilentlyContinue'
-                Remove-IntuneWin32AppAssignment -id $app.id -WarningAction SilentlyContinue | Out-Null
-                $WarningPreference = $originalWarningPreference
-              }
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Unassigned previous assignments." -Tag "Applications", "$($configuration.application.Name)"
-            }
-            for($x = $configuration.keep_previous_versions; $x -lt $current_deployed.count; $x++){
-              Remove-IntuneWin32App -id $current_deployed[$x].id
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Removed previous versions ($($current_deployed.count - $configuration.keep_previous_versions))." -Tag "Applications", "$($configuration.application.Name)"
-            }
-          }
-          catch{
-            $err = $true
-            $display_name = "$($script:app_prefix)$($configuration.application.Name)*"
-            $failed_app = Get-AFIntuneWin32App -failed -DisplayName $display_name
-            foreach($id in $(($failed_app | Where-Object {$_.uploadState -eq 0} | Select-Object id).id)){
-              Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $configuration.application.Name
-              Remove-IntuneWin32App -id $id
-            }            
-            Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: $($_.Exception.Message)" -Level "Error" -Tag "Process", $configuration.application.Name
-            continue
-          }
-        }
-        # Determine output file path for installer
-        $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Download" -AdditionalChildPath $configuration.application.slug
-        Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
-        Write-AFLogEntry -Message "[<c='green'>$($configuration.application.Name)</c>] :: Completed Process" -Tag "Process", "$($configuration.application.Name)"
-      }
+      $processLock = [IO.File]::Open(
+        $lockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+      )
     }
     catch {
-      $err = $true
-      Write-AFLogEntry -Message $_.Exception.Message -Level "Error" -Tag "Process", "$($configuration.application.Name)"
-      $_
+      throw (
+        "Cannot acquire the client-process lock at '$lockPath'. " +
+        "Another process may be using this workspace. " +
+        $_.Exception.Message
+      )
     }
-    finally {
 
+    $attemptLimit = [Math]::Max(1, [int]$script:retries)
+    $configurations = @()
+    $intuneApps = @()
+
+    # Only repeat setup reads. Never repeat the entire publication loop.
+    for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+      try {
+        $lookup = @{ id = $script:client_id }
+
+        if ($application_name) {
+          $lookup.application_id = $application_name
+        }
+
+        $configurations = @(
+          Get-AFApplicationConfigurations @lookup -ErrorAction Stop
+        )
+
+        Write-AFLogEntry `
+          -Message "[Application Factory] :: Found $($configurations.Count) application configurations." `
+          -Tag "Process" `
+          -ErrorAction Continue -WarningAction Continue
+        if ($configurations.Count -eq 0) {
+          Write-AFLogEntry `
+            -Message "[Application Factory] :: No applications found for processing." `
+            -Level Warning -Tag "Process" `
+            -ErrorAction Continue -WarningAction Continue
+        }
+
+        if (-not $DownloadOnly -and $configurations.Count -gt 0) {
+          Write-AFLogEntry `
+            -Message "[Application Factory] :: Connecting to Intune and reading the application inventory." `
+            -Tag "Process" `
+            -ErrorAction Continue -WarningAction Continue
+
+          Connect-AFIntuneGraph -Force
+
+          $filter = [uri]::EscapeDataString(
+            "isof('microsoft.graph.win32LobApp') and " +
+            "contains(notes,'AppFactoryID:')"
+          )
+
+          $intuneApps = @(
+            Get-AFClientGraphCollection -Uri (
+              "deviceAppManagement/mobileApps?`$filter=$filter"
+            )
+          )
+        }
+
+        break
+      }
+      catch {
+        if ($attempt -eq $attemptLimit) {
+          throw
+        }
+
+        Write-AFLogEntry `
+          -Message "Client setup failed; retrying read operations ($attempt/$attemptLimit). $(Protect-AFNativeDiagnostic -Text $_.Exception.Message)" `
+          -Level Warning -Tag "Process" `
+          -ErrorAction Continue -WarningAction Continue
+
+        Write-Warning (
+          "Client setup failed; retrying read operations " +
+          "($attempt/$attemptLimit). " +
+          (Protect-AFNativeDiagnostic -Text $_.Exception.Message)
+        )
+
+        Start-Sleep -Seconds 15
+      }
     }
-    
 
-
-    if (-not $err) {
-      break
+    if ($ResumePublishedAppId -and $configurations.Count -ne 1) {
+      throw (
+        "ResumePublishedAppId requires exactly one configuration. " +
+        "Select it using application_name."
+      )
     }
-    else {
-      Write-AFLogEntry -Message "[Application Factory] :: Errors occured, looking for bad uploads to clean up... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
 
-      $app_params = @{}
-      if($application_name){
-        $app_params.DisplayName = "$($script:app_prefix)$($application_name)*"
+    # Use the full enabled client catalog for dependency resolution, even for a single-app run.
+    $dependencyCatalog = @(Get-AFApplicationConfigurations -id $script:client_id -ErrorAction Stop)
+    $configurations = @(Get-AFDependencyOrderedConfigurations -Configurations $configurations -Catalog $dependencyCatalog)
+
+    $resumeRole = ""
+    if ($ResumePublishedAppId) {
+      $resumeApp = Invoke-AFNativeGraphRequest -Method GET -Uri "deviceAppManagement/mobileApps/$ResumePublishedAppId"
+      $resumeRole = Get-AFNativeAppRole -Notes ([string]$resumeApp.notes)
+    }
+    $roleParameters = @{ Configurations = $configurations; DownloadOnly = $DownloadOnly }
+    if ($resumeRole) { $roleParameters.ResumeRole = $resumeRole }
+    $configurations = @(New-AFClientRoleConfigurations @roleParameters)
+
+    foreach ($configuration in $configurations) {
+      # Refresh identity inventory after earlier prerequisites were published.
+      if (-not $DownloadOnly) {
+        $filter = [uri]::EscapeDataString("isof('microsoft.graph.win32LobApp') and contains(notes,'AppFactoryID:')")
+        $intuneApps = @(Get-AFClientGraphCollection -Uri "deviceAppManagement/mobileApps?%24filter=$filter")
       }
-      elseif($script:app_prefix){
-        $app_params.DisplayName = "$($script:app_prefix)*"
+      $role = [string]$configuration.PublicationRole
+      $application = $configuration.application
+      $appId = [string]$application.id
+      $appName = [string]$application.Name
+
+      $version = if ($configuration.versions.raw_version) {
+        [string]$configuration.versions.raw_version
       }
-      Connect-MSIntuneGraph -TenantID $script:appregistration_tenant -ClientID $script:appregistration_client -ClientSecret $script:appregistration_secret | Out-Null
-      $intune_apps = Get-AFIntuneWin32App @app_params -failed
-      foreach($app in $intune_apps){
-        Write-AFLogEntry -Message "[<c='green'>$($app.DisplayName)</c>] :: Upload failed. Cleaning up Intune application." -Level "Warning" -Tag "Process", $app.DisplayName
-        Remove-IntuneWin32App -id $app.id
+      elseif (
+        $application.latest_version.raw_version
+      ) {
+        [string]$application.latest_version.raw_version
       }
-      Write-AFLogEntry -Message "[Application Factory] :: Errors encountered during processing. Retrying... ($($tries+1)/$($script:retries))" -Level "Warning" -Tag "Process"
-      Start-Sleep -Seconds 180
+      else {
+        [string]$configuration.version.raw_version
+      }
+
+      $script:published_application = $null
+      $script:af_native_upload_status = $null
+      $script:published_version = $version
+
+      $journal = $null
+      $journalPath = ""
+      $publicationStarted = $false
+      $stage = "Preflight"
+      $replaceInPlace = $false
+      $inPlaceOperation = $false
+      $replacementTarget = $null
+      $assignmentSnapshot = @()
+      $reconciliationOnly = $false
+      $reconcileExistingId = ""
+      $dependencyBindings = @()
+      $cleanupBlocked = [Collections.Generic.List[object]]::new()
+
+      try {
+        if (
+          [string]::IsNullOrWhiteSpace($appId) -or
+          [string]::IsNullOrWhiteSpace($appName) -or
+          [string]::IsNullOrWhiteSpace($version)
+        ) {
+          throw "Application ID, name, and version are required."
+        }
+
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Starting client process for version $version." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
+        if ($Force) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Force flag is set." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+
+        $modeProperty = $configuration.PSObject.Properties["replace_in_place"]
+        if ($null -ne $modeProperty -and $null -ne $modeProperty.Value) {
+          if ($modeProperty.Value -isnot [bool]) {
+            throw "replace_in_place must be a JSON boolean."
+          }
+          $replaceInPlace = [bool]$modeProperty.Value
+        }
+
+        if ($DownloadOnly) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Download-only mode: downloading package files." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          Get-AFApplicationClientFiles `
+            -configuration $configuration `
+            -ErrorAction Stop
+
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Download-only process completed; upload and assignments skipped." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          $results.Add([PSCustomObject]@{
+              Application = $appName
+              Role        = $role
+              Version     = $version
+              State       = "Downloaded"
+              AppId       = ""
+              JournalPath = ""
+            })
+
+          continue
+        }
+
+        $journalPath = Get-AFClientProcessJournalPath `
+          -ApplicationRole $role `
+          -ApplicationId $appId `
+          -Version $version
+
+        $existingJournal = $null
+
+        if (Test-Path -LiteralPath $journalPath -PathType Leaf) {
+          $existingJournal = Get-Content `
+            -LiteralPath $journalPath `
+            -Raw |
+          ConvertFrom-Json -DateKind String
+
+          if (
+            $existingJournal.ApplicationId -ne $appId -or
+            [string]$existingJournal.Version -cne $version
+          ) {
+            throw "Saved client-process status has an invalid identity."
+          }
+
+          $savedRole = "normal"
+          if ($existingJournal.PSObject.Properties["PublicationRole"]) { $savedRole = [string]$existingJournal.PublicationRole }
+          if ($savedRole -ne $role) { throw "Saved journal belongs to a different publication role." }
+
+          if (
+            $existingJournal.State -ne "Complete" -and
+            -not $ResumePublishedAppId
+          ) {
+            throw (
+              "An unfinished attempt already exists. " +
+              "State=$($existingJournal.State); " +
+              "Stage=$($existingJournal.Stage); " +
+              "AppId=$($existingJournal.AppId); " +
+              "Journal=$journalPath. " +
+              "Inspect the application before retrying. " +
+              "Use ResumePublishedAppId only when it is published."
+            )
+          }
+        }
+
+        $identityPattern = (
+          '(?im)^\s*AppFactoryID:' +
+          [regex]::Escape($appId) +
+          '\s*$'
+        )
+
+        $matchingApps = @(
+          $intuneApps |
+          Where-Object {
+            [string]$_.notes -match $identityPattern -and
+            (Get-AFNativeAppRole -Notes ([string]$_.notes)) -eq $role
+          } |
+          Sort-Object createdDateTime -Descending
+        )
+
+        # Replacement identity comes from the exact AppFactoryID Notes marker.
+        # Display names and naming prefixes do not determine application identity.
+
+        # Check all version journals for the exact client/tenant/prefix/app.
+        foreach ($stateFile in @(
+            Get-ChildItem -LiteralPath (
+              [IO.Path]::GetDirectoryName($journalPath)
+            ) -Filter "*.json" -File -ErrorAction Stop
+          )) {
+          $saved = Get-Content -LiteralPath $stateFile.FullName -Raw |
+          ConvertFrom-Json -DateKind String -ErrorAction Stop
+          if (
+            [string]$saved.ApplicationId -ne $appId -or
+            [string]$saved.TenantId -ne [string]$script:appregistration_tenant -or
+            [string]$saved.ClientId -ne [string]$script:client_id
+          ) { continue }
+
+          $savedRole = "normal"
+          if ($saved.PSObject.Properties["PublicationRole"]) { $savedRole = [string]$saved.PublicationRole }
+          if ($savedRole -ne $role) { continue }
+          $expectedPath = Get-AFClientProcessJournalPath `
+          -ApplicationRole $role `
+            -ApplicationId $appId `
+            -Version ([string]$saved.Version)
+          if ($stateFile.FullName -ne $expectedPath) { continue }
+          if ($saved.State -eq "Complete") { continue }
+          if (
+            $ResumePublishedAppId -and
+            $stateFile.FullName -eq $journalPath -and
+            [string]$saved.AppId -eq $ResumePublishedAppId
+          ) { continue }
+
+          throw (
+            "An unfinished attempt already exists. " +
+            "Operation=$($saved.Operation); Version=$($saved.Version); " +
+            "AppId=$($saved.AppId); Journal=$($stateFile.FullName). " +
+            "Inspect the saved attempt before publishing again. " +
+            "For an in-place replacement, preserve the existing application."
+          )
+        }
+
+        if ($ResumePublishedAppId) {
+          $inPlaceOperation = (
+            $null -ne $existingJournal -and
+            $existingJournal.Operation -eq "ReplaceInPlace"
+          )
+          if ($inPlaceOperation) {
+            if ($null -eq $existingJournal.PSObject.Properties["AssignmentSnapshot"]) {
+              throw "The replacement journal has no assignment snapshot."
+            }
+            $assignmentSnapshot = @($existingJournal.AssignmentSnapshot)
+          }
+        }
+        elseif ($replaceInPlace) {
+          $replacementTarget = Get-AFClientReplacementTarget `
+            -ApplicationRole $role `
+            -MatchingApps $matchingApps `
+            -ApplicationId $appId `
+            -ApplicationName $appName
+          if ($null -ne $replacementTarget) {
+            $inPlaceOperation = $true
+            if (
+              [string]$replacementTarget.displayVersion -ceq $version -and
+              -not $Force
+            ) {
+              $reconcileExistingId = [string]$replacementTarget.id
+              $reconciliationOnly = $true
+            }
+            $assignmentSnapshot = @(
+              Get-AFClientGraphCollection -Uri (
+                "deviceAppManagement/mobileApps/" +
+                "$($replacementTarget.id)/assignments"
+              )
+            )
+          }
+        }
+
+        $sameVersion = @(
+          $matchingApps | Where-Object {
+            [string]$_.displayVersion -ceq $version
+          }
+        )
+
+        $readySameVersion = @(
+          $sameVersion | Where-Object {
+            $null -ne $_.uploadState -and
+            [int]$_.uploadState -eq 1 -and
+            $_.publishingState -eq "published" -and
+            $_.committedContentVersion
+          }
+        )
+
+        if (-not $ResumePublishedAppId) {
+          $unresolved = @(
+            $sameVersion | Where-Object {
+              [string]$_.id -notin @($readySameVersion.id)
+            }
+          )
+
+          if ($unresolved.Count -gt 0) {
+            throw (
+              "This version has unresolved Intune applications: " +
+              "$($unresolved.id -join ', '). " +
+              "They will not be deleted or automatically republished."
+            )
+          }
+
+          if (-not $inPlaceOperation -and $readySameVersion.Count -gt 0 -and -not $Force) {
+            if ($readySameVersion.Count -ne 1) { throw "This version has multiple published targets." }
+            $reconcileExistingId = [string]$readySameVersion[0].id
+            $reconciliationOnly = $true
+            $assignmentSnapshot = @(Get-AFClientGraphCollection -Uri "deviceAppManagement/mobileApps/$reconcileExistingId/assignments")
+          }
+        }
+
+        $previousApps = @(
+          $matchingApps | Where-Object {
+            $null -ne $_.uploadState -and
+            [int]$_.uploadState -eq 1 -and
+            $_.publishingState -eq "published" -and
+            $_.committedContentVersion -and
+            [string]$_.id -ne $ResumePublishedAppId -and
+            [string]$_.id -ne $reconcileExistingId
+          }
+        )
+
+        $keepPrevious = 0
+
+        if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace -and -not $inPlaceOperation) {
+          $rawKeep = [string]$configuration.keep_previous_versions
+
+          if (
+            -not [int]::TryParse($rawKeep, [ref]$keepPrevious) -or
+            $keepPrevious -lt 0
+          ) {
+            throw "keep_previous_versions must be a nonnegative integer."
+          }
+        }
+
+        if ($replacementTarget) {
+          Assert-AFDependencyScope -App $replacementTarget -Configuration $configuration
+          if (-not $reconciliationOnly -and $role -eq "normal") {
+            Assert-AFInPlaceDependenciesSafe -App $replacementTarget
+          }
+        }
+        if ($ResumePublishedAppId) {
+          if ($existingJournal.DependencySchemaVersion -ne 1) {
+            throw "Resume requires a dependency-aware journal. Inspect the existing publication before continuing."
+          }
+          $dependencyBindings = @($existingJournal.ExpectedDependencies)
+          $reconciliationOnly = $existingJournal.Operation -eq "ReconcileOnly"
+        } else {
+          $dependencyBindings = @(Resolve-AFDependencyBindings -Configuration $configuration -Catalog $dependencyCatalog)
+        }
+
+        $plan = $null
+        if (-not $reconciliationOnly -and (-not $inPlaceOperation -or $role -eq "updater")) {
+          # Validate expected targets and filters before app creation.
+          $plan = Get-AFClientAssignmentPlan `
+            -Configuration $configuration `
+            -PreviousApps $previousApps
+
+          # Validate every selected ESP before app creation.
+          foreach ($espName in @(
+              $configuration.esp_assignments |
+              ForEach-Object {
+                if ($_ -isnot [string]) {
+                  throw "ESP assignments must contain profile names as strings."
+                }
+                $_.Trim()
+              } |
+              Where-Object { $_ } |
+              Select-Object -Unique
+            )) {
+            $esp = Get-AFClientUniqueGraphObject `
+              -Resource "deviceManagement/deviceEnrollmentConfigurations" `
+              -DisplayName $espName
+
+            if (
+              $esp.'@odata.type' -ne
+              "#microsoft.graph.windows10EnrollmentCompletionPageConfiguration"
+            ) {
+              throw "'$espName' is not a Windows ESP configuration."
+            }
+          }
+
+        }
+
+        if (
+          $ResumePublishedAppId -and
+          $existingJournal.AppId -and
+          $existingJournal.AppId -ne $ResumePublishedAppId
+        ) {
+          throw (
+            "ResumePublishedAppId differs from the app ID " +
+            "recorded in the unfinished attempt."
+          )
+        }
+
+        $journal = [ordered]@{
+          ConfigurationId          = [string]$configuration.id
+          DependencySchemaVersion  = 1
+          ExpectedDependencies     = @($dependencyBindings)
+          DependencyOperations     = if ($ResumePublishedAppId) { @($existingJournal.DependencyOperations) } else { @() }
+          ReconcileReverseDependencies = if ($ResumePublishedAppId) { [bool]$existingJournal.ReconcileReverseDependencies } else { [bool]$configuration.reconcile_reverse_dependencies }
+          CleanupBlocked           = @()
+          ApplicationId            = $appId
+          PublicationRole          = $role
+          ApplicationName          = $appName
+          Version                  = $version
+          TenantId                 = [string]$script:appregistration_tenant
+          ClientId                 = [string]$script:client_id
+          Publisher                = "Native"
+          Operation                = if ($reconciliationOnly) { "ReconcileOnly" } elseif ($inPlaceOperation) { "ReplaceInPlace" } else { "Create" }
+          AppPrefix                = [string]$script:app_prefix
+          OriginalDisplayVersion   = if ($replacementTarget) {
+            [string]$replacementTarget.displayVersion
+          }
+          elseif ($inPlaceOperation) {
+            [string]$existingJournal.OriginalDisplayVersion
+          }
+          else { "" }
+          OriginalContentVersionId = if ($replacementTarget) {
+            [string]$replacementTarget.committedContentVersion
+          }
+          elseif ($inPlaceOperation) {
+            [string]$existingJournal.OriginalContentVersionId
+          }
+          else { "" }
+          AssignmentSnapshot       = @($assignmentSnapshot)
+          ExpectedDetectionRules   = @()
+          ExpectedRequirementRules = @()
+          RequirementRulesSchemaVersion = 0
+          ExpectedArchitectures    = ""
+          State                    = "Preparing"
+          Stage                    = "Preflight"
+          AppId                    = ""
+          ContentVersionId         = ""
+          FileId                   = ""
+          UploadStage              = ""
+          WorkDirectory            = ""
+          Error                    = ""
+          PreviousAppIds           = @($previousApps.id)
+          StartedUtc               = [DateTimeOffset]::UtcNow.ToString("o")
+          UpdatedUtc               = ""
+        }
+
+        if ($reconcileExistingId) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Version $version already exists; reconciling dependencies without uploading content." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          $journal.AppId = $reconcileExistingId
+          $journal.AssignmentSnapshot = @($assignmentSnapshot)
+          $ready = Assert-AFClientPublishedApp -ApplicationRole $role -AppId $reconcileExistingId -ApplicationId $appId -Version $version -TimeoutSeconds 0
+          Assert-AFDependencyScope -App $ready -Configuration $configuration
+          $journal.ExpectedRequirementRules = @($ready.requirementRules)
+          $journal.RequirementRulesSchemaVersion = 1
+          Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        }
+        elseif ($ResumePublishedAppId) {
+          $stage = "ValidateResumeApplication"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Validating published application $ResumePublishedAppId before resuming." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+
+          $published = Assert-AFClientPublishedApp `
+            -ApplicationRole $role `
+            -AppId $ResumePublishedAppId `
+            -ApplicationId $appId `
+            -Version $version `
+            -TimeoutSeconds 0
+
+
+          if ([int]$existingJournal.RequirementRulesSchemaVersion -ne 1) {
+            throw (
+              "This journal does not contain verified requirement-rule expectations. " +
+              "Reconcile the existing publication before starting a new attempt."
+            )
+          }
+          
+          $expectedRequirementRules = @(
+            $existingJournal.ExpectedRequirementRules |
+              Where-Object { $null -ne $_ }
+          )
+          
+          if (-not (Test-AFNativeRequirementRulesMatch `
+                -ExpectedRules $expectedRequirementRules `
+                -ActualRules $published.requirementRules)) {
+            throw "Resume requires the saved requirement rules to match Graph."
+          }
+          
+          if ([string]$existingJournal.ConfigurationId -ne [string]$configuration.id) { throw "Resume configuration identity differs." }
+          $assignmentSnapshot = @($existingJournal.AssignmentSnapshot)
+          $journal.ExpectedRequirementRules = @($expectedRequirementRules)
+          $journal.RequirementRulesSchemaVersion = 1
+
+          if ($inPlaceOperation) {
+            if (
+              [string]::IsNullOrWhiteSpace([string]$existingJournal.ContentVersionId) -or
+              [string]$published.committedContentVersion -cne
+              [string]$existingJournal.ContentVersionId
+            ) {
+              throw "Resume requires the exact replacement content version to be active."
+            }
+            if (
+              @($existingJournal.ExpectedDetectionRules).Count -eq 0 -or
+              [string]::IsNullOrWhiteSpace([string]$existingJournal.ExpectedArchitectures) -or
+              -not (Test-AFNativeDetectionRulesMatch -ExpectedRules @($existingJournal.ExpectedDetectionRules) -ActualRules @($published.detectionRules))
+            ) {
+              throw "Resume requires the replacement's saved detection rules to match Graph."
+            }
+            $expectedArchitectures = @(
+              ([string]$existingJournal.ExpectedArchitectures) -split ',' |
+              ForEach-Object { $_.Trim().ToLowerInvariant() } | Sort-Object -Unique
+            )
+            $actualArchitectures = @(
+              ([string]$published.allowedArchitectures) -split ',' |
+              ForEach-Object { $_.Trim().ToLowerInvariant() } | Sort-Object -Unique
+            )
+            if (($actualArchitectures -join ',') -cne ($expectedArchitectures -join ',')) {
+              throw "Resume architecture verification failed."
+            }
+            $journal.ExpectedDetectionRules = @($existingJournal.ExpectedDetectionRules)
+            $journal.ExpectedArchitectures = [string]$existingJournal.ExpectedArchitectures
+            $journal.ContentVersionId = [string]$existingJournal.ContentVersionId
+            $journal.FileId = [string]$existingJournal.FileId
+            $journal.UploadStage = [string]$existingJournal.UploadStage
+            $journal.WorkDirectory = [string]$existingJournal.WorkDirectory
+          }
+
+          $script:published_application = $published
+          $journal.AppId = [string]$published.id
+          $journal.Publisher = "Existing"
+        }
+        else {
+          $stage = "DownloadFiles"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Downloading and validating package files." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+
+          # Retry only before publishing begins.
+          for (
+            $attempt = 1;
+            $attempt -le $attemptLimit;
+            $attempt++
+          ) {
+            try {
+              $script:application_data = $null
+
+              Get-AFApplicationClientFiles `
+                -configuration $configuration `
+                -ErrorAction Stop
+
+              $downloadFolder = Join-Path `
+              (Join-Path $script:working_folder "Download") `
+                $application.slug
+
+              $packagePath = Join-Path `
+                $downloadFolder `
+                "$appName.intunewin"
+
+              if (
+                -not (Test-Path -LiteralPath $packagePath -PathType Leaf) -or
+                -not $script:application_data
+              ) {
+                throw "Downloaded package or App.json is missing."
+              }
+
+              $needsScript = @(
+                $script:application_data.DetectionRule |
+                Where-Object { $_.Type -eq "script" }
+              ).Count -gt 0
+
+              if (
+                $needsScript -and
+                -not (Test-Path `
+                    -LiteralPath (Join-Path $downloadFolder "Detection.ps1") `
+                    -PathType Leaf)
+              ) {
+                throw "The required detection script is missing."
+              }
+
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Package files downloaded and validated." `
+                -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
+
+              break
+            }
+            catch {
+              if ($attempt -eq $attemptLimit) {
+                throw
+              }
+
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Download failed; retrying ($attempt/$attemptLimit)." `
+                -Level Warning -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
+
+              Write-Warning (
+                "Download failed for '$appName'; retrying " +
+                "($attempt/$attemptLimit)."
+              )
+
+              Start-Sleep -Seconds 15
+            }
+          }
+
+          if ($inPlaceOperation) {
+            $journal.AppId = [string]$replacementTarget.id
+          }
+
+          $stage = "Publish"
+          $journal.State = "PublishStarted"
+          $journal.Stage = $stage
+
+          # This must succeed before any creation request is sent.
+          Save-AFClientProcessJournal `
+            -Path $journalPath `
+            -Journal $journal
+
+          $publicationStarted = $true
+
+          $previousCheckpoint = Get-Variable `
+            -Name af_native_publication_journal `
+            -Scope Script `
+            -ErrorAction SilentlyContinue
+
+          $script:af_native_publication_journal = @{
+            Enabled = [bool]$UseNativeUpload
+            Path    = $journalPath
+            Journal = $journal
+          }
+
+          try {
+            $publishParameters = @{
+              configuration   = $configuration
+              UseNativeUpload = $UseNativeUpload
+              UploadTransport = $UploadTransport
+              AzCopyPath      = $AzCopyPath
+              ErrorAction     = "Stop"
+            }
+            if ($inPlaceOperation) {
+              $publishParameters.ExistingAppId = [string]$replacementTarget.id
+              $publishParameters.ExpectedDisplayVersion =
+              [string]$journal.OriginalDisplayVersion
+              $publishParameters.ExpectedContentVersion =
+              [string]$journal.OriginalContentVersionId
+            }
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: Publishing version $version. Operation=$($journal.Operation); requested transport=$UploadTransport." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
+
+            Publish-AFApplicationClientApp @publishParameters
+          }
+          finally {
+            if ($null -ne $previousCheckpoint) {
+              $script:af_native_publication_journal = $previousCheckpoint.Value
+            }
+            else {
+              Remove-Variable `
+                -Name af_native_publication_journal `
+                -Scope Script `
+                -ErrorAction SilentlyContinue
+            }
+          }
+
+          if (-not $script:published_application.id) {
+            throw "The publisher did not return an application ID."
+          }
+
+          $journal.AppId = [string]$script:published_application.id
+
+          if ($UseNativeUpload -and $script:af_native_upload_status) {
+            $journal.ContentVersionId =
+            [string]$script:af_native_upload_status.ContentVersionId
+
+            $journal.FileId =
+            [string]$script:af_native_upload_status.FileId
+
+            $journal.UploadStage =
+            [string]$script:af_native_upload_status.Stage
+
+            $journal.WorkDirectory =
+            [string]$script:af_native_upload_status.WorkDirectory
+          }
+
+          # Save the known ID before checking readiness.
+          $journal.State = "PublishedResponseReceived"
+
+          Save-AFClientProcessJournal `
+            -Path $journalPath `
+            -Journal $journal
+        }
+
+        $stage = "ConfirmPublished"
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Confirming published application $($journal.AppId)." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
+
+        $script:published_application = Assert-AFClientPublishedApp `
+            -ApplicationRole $role `
+          -AppId $journal.AppId `
+          -ApplicationId $appId `
+          -Version $version
+
+        $journal.State = "Published"
+        $journal.Stage = $stage
+
+        Save-AFClientProcessJournal `
+          -Path $journalPath `
+          -Journal $journal
+
+        $stage = "ApplyDependencies"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Applying and verifying dependency policy." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+        Set-AFPublishedDependencies -Configuration $configuration -Bindings $dependencyBindings -Journal $journal -JournalPath $journalPath
+
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Dependency policy verified." `
+          -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
+        if ($inPlaceOperation -and $role -eq "updater" -and -not $reconciliationOnly) {
+          $stage = "ApplyUpdaterAssignments"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Applying and verifying updater assignments." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          Set-AFApplicationClientGroups -configuration $configuration -Plan $plan -ErrorAction Stop | Out-Null
+          Assert-AFClientAssignments -AppId $journal.AppId -Plan $plan
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Updater assignments verified." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+        }
+        elseif ($inPlaceOperation -or $reconciliationOnly) {
+          $stage = "VerifyPreservedAssignments"
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Verifying preserved assignments." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          Assert-AFClientAssignmentsUnchanged `
+            -AppId ([guid]$journal.AppId) `
+            -ExpectedAssignments $assignmentSnapshot
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Preserved assignments verified; assignment and ESP writes skipped." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          # Apply the exact native plan captured before publishing.
+          # Graph authentication refreshes through Invoke-AFNativeGraphRequest.
+          $stage = "ApplyAssignments"
+          $journal.Stage = $stage
+
+          Save-AFClientProcessJournal `
+            -Path $journalPath `
+            -Journal $journal
+
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Applying assignment plan, including previous assignments when configured." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          Set-AFApplicationClientGroups `
+            -configuration $configuration `
+            -Plan $plan `
+            -ErrorAction Stop |
+          Out-Null
+
+          $stage = "VerifyAssignments"
+
+          Assert-AFClientAssignments `
+            -AppId $journal.AppId `
+            -Plan $plan
+
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Assignment plan verified." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+
+          $stage = "ApplyESP"
+
+          if ($configuration.esp_assignments) {
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: Applying and verifying ESP assignments." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
+
+            Set-AFApplicationClientESPAssignments `
+              -configuration $configuration `
+              -ErrorAction Stop |
+            Out-Null
+            Write-AFLogEntry `
+              -Message "[$appName][$role] :: ESP assignments verified." `
+              -Tag "Process", $appName `
+              -ErrorAction Continue -WarningAction Continue
+          }
+
+        }
+
+        $stage = "ReconcileReverseDependencies"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        $reverseConfiguration = $configuration.PSObject.Copy()
+        $reverseConfiguration | Add-Member -NotePropertyName reconcile_reverse_dependencies -NotePropertyValue ([bool]$journal.ReconcileReverseDependencies) -Force
+        if ($reverseConfiguration.reconcile_reverse_dependencies -and $role -eq "normal") {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Reconciling previous dependency references." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Reverse dependency reconciliation is disabled for this publication." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        Invoke-AFReverseDependencyReconciliation -Configuration $reverseConfiguration -PreviousApps $previousApps -Journal $journal -JournalPath $journalPath
+
+        $stage = "PreviousVersionCleanup"
+        $journal.Stage = $stage
+        Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+        if ($SkipPreviousVersionCleanup -or $replaceInPlace -or $inPlaceOperation) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Previous-version cleanup skipped by the selected publishing mode." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Checking $($previousApps.Count) previous applications; retaining $keepPrevious previous versions." `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        if (-not $SkipPreviousVersionCleanup -and -not $replaceInPlace -and -not $inPlaceOperation) {
+          Assert-AFClientPublishedApp -ApplicationRole $role -AppId $journal.AppId -ApplicationId $appId -Version $version -TimeoutSeconds 0 | Out-Null
+          for ($index = 0; $index -lt $previousApps.Count; $index++) {
+            $previous = $previousApps[$index]
+            $delete = $index -ge $keepPrevious
+            if (-not $delete -and -not $configuration.unassign_previous_assignments) { continue }
+            try {
+              # References are checked before either detaching, unassigning, or deleting.
+              if ($delete) {
+                Clear-AFRetiringDependencies -Previous $previous -Configuration $configuration -Journal $journal -JournalPath $journalPath
+              } else {
+                Assert-AFDependencyCleanupSafe -Id ([guid]$previous.id)
+              }
+              if ($configuration.unassign_previous_assignments) {
+                Remove-AFIntuneAppAssignments -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+                Write-AFLogEntry `
+                  -Message "[$appName][$role] :: Confirmed previous application $($previous.id) has no assignments." `
+                  -Tag "Process", $appName `
+                  -ErrorAction Continue -WarningAction Continue
+              }
+              if ($delete) {
+                Remove-AFIntuneWin32App -ApplicationRole $role -Id ([guid]$previous.id) -ApplicationId $appId -Version ([string]$previous.displayVersion) -ProtectedAppId $journal.AppId -ErrorAction Stop | Out-Null
+                Write-AFLogEntry `
+                  -Message "[$appName][$role] :: Confirmed previous application $($previous.id) is absent." `
+                  -Tag "Process", $appName `
+                  -ErrorAction Continue -WarningAction Continue
+              }
+            } catch {
+              # An ambiguous relationship write needs explicit resume, not a terminal retention result.
+              if (@($journal.DependencyOperations | Where-Object { $_.State -ne "Verified" }).Count) { throw }
+              $cleanupBlocked.Add([pscustomobject]@{AppId=[string]$previous.id; Reason=(Protect-AFNativeDiagnostic -Text $_.Exception.Message)})
+              $journal.CleanupBlocked = @($cleanupBlocked.ToArray())
+              Write-AFLogEntry `
+                -Message "[$appName][$role] :: Previous application $($previous.id) retained. $($cleanupBlocked[$cleanupBlocked.Count - 1].Reason)" `
+                -Level Warning -Tag "Process", $appName `
+                -ErrorAction Continue -WarningAction Continue
+
+              Save-AFClientProcessJournal -Path $journalPath -Journal $journal
+            }
+          }
+        }
+
+        $stage = "Complete"
+        $journal.State = "Complete"
+        $journal.Stage = $stage
+
+        Save-AFClientProcessJournal `
+          -Path $journalPath `
+          -Journal $journal
+
+        try {
+          Remove-AFClientCompletedWork `
+            -Configuration $configuration `
+            -Journal $journal `
+            -ErrorAction Stop
+        }
+        catch {
+          # Publication and client processing already succeeded.
+          # A local cleanup failure must not turn that into a failed publish.
+          Write-Warning (
+            "Application processing completed, but local cleanup failed. " +
+            (Protect-AFNativeDiagnostic -Text $_.Exception.Message)
+          ) -WarningAction Continue
+        }
+
+        $results.Add([PSCustomObject]@{
+            Application = $appName
+              Role        = $role
+            Version     = $version
+            State       = if ($cleanupBlocked.Count) { "PublishedCleanupBlocked" } elseif ($reconciliationOnly) { "DependenciesReconciled" } else { "Complete" }
+            CleanupBlocked = @($cleanupBlocked.ToArray())
+            AppId       = [string]$journal.AppId
+            JournalPath = $journalPath
+            Operation   = [string]$journal.Operation
+          })
+
+        if ($cleanupBlocked.Count -gt 0) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Publication processed for version $version; cleanup blocked for $($cleanupBlocked.Count) previous applications. Journal=$journalPath" `
+            -Level Warning -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        elseif ($reconciliationOnly) {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Dependencies reconciled for existing version $version. AppId=$($journal.AppId)" `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+        else {
+          Write-AFLogEntry `
+            -Message "[$appName][$role] :: Client process completed for version $version. AppId=$($journal.AppId)" `
+            -Tag "Process", $appName `
+            -ErrorAction Continue -WarningAction Continue
+        }
+      }
+      catch {
+        $failureText = Protect-AFNativeDiagnostic `
+          -Text $_.Exception.Message
+
+        # Persist a failure only if publishing began or an existing
+        # published application was successfully validated.
+        # Download/preflight/invalid-resume failures must not overwrite
+        # an earlier publication journal.
+        if (
+          $journal -and
+          (
+            $publicationStarted -or
+            -not [string]::IsNullOrWhiteSpace(
+              [string]$journal.AppId
+            )
+          )
+        ) {
+          $journal.State = "Failed"
+          $journal.Stage = $stage
+          $journal.Error = $failureText
+
+          if (
+            $publicationStarted -and
+            $UseNativeUpload -and
+            $script:af_native_upload_status
+          ) {
+            $uploadStatus = $script:af_native_upload_status
+
+            if ($uploadStatus.AppId) {
+              $journal.AppId = [string]$uploadStatus.AppId
+            }
+
+            $journal.ContentVersionId =
+            [string]$uploadStatus.ContentVersionId
+
+            $journal.FileId = [string]$uploadStatus.FileId
+            $journal.UploadStage = [string]$uploadStatus.Stage
+            $journal.WorkDirectory = [string]$uploadStatus.WorkDirectory
+          }
+
+          try {
+            Save-AFClientProcessJournal `
+              -Path $journalPath `
+              -Journal $journal
+          }
+          catch {
+            Write-Warning (
+              "Could not save the final failure status. " +
+              "The earlier publishing marker may remain. " +
+              $_.Exception.Message
+            ) -WarningAction Continue
+          }
+        }
+
+        $resultAppId = if ($journal) {
+          [string]$journal.AppId
+        }
+        else {
+          ""
+        }
+
+        $results.Add([PSCustomObject]@{
+            Application = $appName
+              Role        = $role
+            Version     = $version
+            State       = "Failed"
+            Stage       = $stage
+            AppId       = $resultAppId
+            JournalPath = $journalPath
+            Error       = $failureText
+          })
+
+        Write-AFLogEntry `
+          -Message "[$appName][$role] :: Failed at '$stage'. AppId=$resultAppId; Journal=$journalPath. $failureText" `
+          -Level Error -Tag "Process", $appName `
+          -ErrorAction Continue -WarningAction Continue
+
+        Write-Warning (
+          "[$appName] failed at '$stage'. " +
+          "No automatic republication or failed-app deletion " +
+          "will be attempted. $failureText"
+        ) -WarningAction Continue
+
+        # Continue with other configurations, never retry this publication.
+        continue
+      }
+    }
+
+    $script:af_client_process_results = @($results.ToArray())
+    $results.ToArray()
+
+    $failed = @(
+      $results | Where-Object { $_.State -eq "Failed" }
+    )
+
+    if ($failed.Count -gt 0) {
+      throw (
+        "$($failed.Count) application(s) failed. " +
+        "Inspect the returned results and saved status files. " +
+        "Published applications were not automatically recreated."
+      )
     }
   }
-  $OutFilePath = Join-Path -Path $script:working_folder -ChildPath "Download"
-  Remove-Item -Path $OutFilePath -Recurse -Force -ErrorAction "SilentlyContinue" | Out-Null
+  finally {
+    if ($processLock) {
+      $processLock.Dispose()
+    }
+  }
 }
+

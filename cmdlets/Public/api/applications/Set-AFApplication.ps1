@@ -127,6 +127,9 @@
     Minimum free disk space in MB.
 .PARAMETER minimummemoryinmb
     Minimum memory in MB.
+.PARAMETER additionalrules
+    Additional file, registry, or PowerShell script requirement rules.
+    An explicitly empty array clears the rules; omission preserves 
 .PARAMETER detection_type
     Type of detection (msi, registry_version, registry_existence, script).
 .PARAMETER detection_scriptfile
@@ -149,6 +152,8 @@
     Value for detection.
 .PARAMETER detection_check32biton64system
     Boolean to check 32-bit on 64-bit system for detection.
+.PARAMETER updaterrules
+    Updater-specific requirements; value_source may be published_version.
 .OUTPUTS
     The response from the API call.
 .EXAMPLE
@@ -219,6 +224,8 @@ function Set-AFApplication {
     [Parameter()][ValidateSet('x86', 'x64', 'all', 'arm64')][string]$architecture,
     [Parameter()][int]$minimumfreediskspaceinmb,
     [Parameter()][int]$minimummemoryinmb,
+    [Parameter()][AllowEmptyCollection()][object[]]$additionalrules,
+    [Parameter()][AllowEmptyCollection()][object[]]$updaterrules,
     [Parameter()][ValidateSet('msi', 'registry_version', 'registry_existence', 'script')][string]$detection_type,
     [Parameter()][string]$detection_scriptfile,
     [Parameter()][bool]$detection_enforcesignaturecheck,
@@ -246,7 +253,7 @@ function Set-AFApplication {
     install         = @('install_type', 'install_argumentList', 'install_additionalArgumentList', 'install_secureArgumentList', 'install_installer', 'install_transforms', 'install_SkipMSIAlreadyInstalledCheck', 'install_script', 'install_wim', 'install_successExitCodes', 'install_rebootExitCodes', 'install_ignoreExitCodes', 'install_conflictingProcessStart', 'install_conflictingProcessEnd')
     uninstall       = @('uninstall_type', 'uninstall_name', 'uninstall_namematch', 'uninstall_productcode', 'uninstall_filterscript', 'uninstall_argumentlist', 'uninstall_additionalargumentlist', 'uninstall_secureargumentlist', 'uninstall_script', 'uninstall_installer', 'uninstall_wim', 'uninstall_dirfiles', 'uninstall_ignoreexitcodes', 'uninstall_conflictingprocessstart', 'uninstall_conflictingprocessend')
     program         = @('experiance', 'devicerestartbehavior', 'allowavailableuninstall')
-    requirementrule = @('minimumsupportedwindowsrelease', 'architecture', 'minimumfreediskspaceinmb', 'minimummemoryinmb')
+    requirementrule = @('minimumsupportedwindowsrelease', 'architecture', 'minimumfreediskspaceinmb', 'minimummemoryinmb', 'additionalrules', 'updaterrules')
     detectionrule   = @('detection_type', 'detection_scriptfile', 'detection_enforcesignaturecheck', 'detection_runas32bit', 'detection_detectionmethod', 'detection_keypath', 'detection_valuename', 'detection_operator', 'detection_productversionoperator', 'detection_value', 'detection_check32biton64system')
   }
   # Build request body from parameters
@@ -275,9 +282,8 @@ function Set-AFApplication {
       }
     }
   }
-  $body | ConvertTo-Json -Depth 5
   try{
-    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -body $($body | ConvertTo-JSON -Depth 5) -Method Patch
+    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -body $($body | ConvertTo-JSON -Depth 20) -Method Patch
     return $response
   }
   catch{

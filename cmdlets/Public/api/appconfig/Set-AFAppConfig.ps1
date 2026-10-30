@@ -32,7 +32,8 @@
 .PARAMETER unassign_previous_assignments
     Boolean to unassign previous assignments. Default: $true
 .PARAMETER esp_assignments
-    ESP assignment profiles string.
+    Array of enrollment status page names. Pass @() to clear the
+    configured selections. Omit this parameter to preserve them.
 .PARAMETER filters
     Filter string for configuration.
 .PARAMETER interactive_install
@@ -41,15 +42,27 @@
     Boolean to enable interactive uninstall. Default: $false
 .PARAMETER versions
     Version string for configuration.
+.PARAMETER replace_in_place
+    Replace the installer on the existing managed Intune app. False creates a new app.
+.PARAMETER include_version_in_display_name
+    Include the version in the Intune display name. Defaults to true for
+    new configurations. When omitted during an update, preserves the
+    existing setting.    
+.PARAMETER create_updater_app
+    Publish a separate updater assigned Required to All devices.
+.PARAMETER dependencies
+    Dependency objects with application_id, dependency_type, version_policy, and version.
+.PARAMETER reconcile_reverse_dependencies
+    Move managed following references to verified replacement versions.
 .OUTPUTS
     The response from the API call.
 .EXAMPLE
     Set-AFAppConfig -id '12345' -application 'App1' -client 'Client1' -assignment_required @('GroupA') -enabled $true
 #>
-function Set-AFAppConfig{
+function Set-AFAppConfig {
   [CmdletBinding()]
   param(
-    [Parameter(Mandatory=$true)][string]$id,
+    [Parameter(Mandatory = $true)][string]$id,
     [Parameter()][string]$application,
     [Parameter()][string]$client,
     [Alias("assignmentRequired")][Parameter()][string[]]$assignment_required,
@@ -59,15 +72,20 @@ function Set-AFAppConfig{
     [Alias("assignmentUninstall")][Parameter()][string[]]$assignment_uninstall,
     [Alias("assignmentUninstallExceptions")][Parameter()][string[]]$assignment_uninstall_exceptions,
     [Parameter()][bool]$enabled = $false,
+    [Parameter()][bool]$create_updater_app,
+    [Parameter()][AllowEmptyCollection()][object[]]$dependencies,
+    [Parameter()][bool]$reconcile_reverse_dependencies,
     [Alias("downloadForeground")][Parameter()][bool]$download_foreground = $false,
     [Alias("keepPreviousVersions")][Parameter()][int]$keep_previous_versions = 0,
     [Alias("copyPreviousAssignments")][Parameter()][bool]$copy_previous_assignments = $false,
     [Alias("unassignPreviousAssignments")][Parameter()][bool]$unassign_previous_assignments = $true,
-    [Alias("espAssignments")][Parameter()][string]$esp_assignments,
+    [Alias("espAssignments")][Parameter()][AllowEmptyCollection()][string[]]$esp_assignments,
     [Parameter()][string]$filters,
     [Alias("interactiveInstall")][Parameter()][bool]$interactive_install = $false,
     [Alias("interactiveUninstall")][Parameter()][bool]$interactive_uninstall = $false,
-    [Parameter()][string]$versions
+    [Parameter()][string]$versions,
+    [Alias("replaceInPlace")][Parameter()][bool]$replace_in_place,
+    [Alias("includeVersionInDisplayName")][Parameter()][bool]$include_version_in_display_name = $true
   )
   # Check for required API header
   if (-not $script:api_header) {
@@ -79,16 +97,16 @@ function Set-AFAppConfig{
   $body = @{} + $PSBoundParameters
   $body.Remove("id") | Out-Null
   # Attempt to send the API request
-  try{
-    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -body $($body | ConvertTo-JSON -Depth 5) -Method Patch
+  try {
+    $response = Invoke-RestMethod -Uri $endpoint -Headers $script:api_header -ContentType "application/json" -body $($body | ConvertTo-JSON -Depth 15) -Method Patch
     return $response
   }
-  catch{
+  catch {
     # Handle and report API errors
-    if(($_.ErrorDetails.Message | ConvertFrom-Json).detail){
+    if (($_.ErrorDetails.Message | ConvertFrom-Json).detail) {
       $error_message = ($_.ErrorDetails.Message | ConvertFrom-Json).detail
     }
-    else{
+    else {
       $error_message = ($_.ErrorDetails.Message | ConvertFrom-Json).name
     }
     Write-Error "Failed to update app config. $error_message"

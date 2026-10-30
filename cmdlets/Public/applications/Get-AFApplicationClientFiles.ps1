@@ -44,9 +44,17 @@ function Get-AFApplicationClientFiles{
       }      
     }
     catch{
-      Write-AFLogEntry -Level Warning -Message "[<c='green'>$($configuration.application.Name)</c>] :: Failed to download file '$file' at url '$blob_url' for application '$($configuration.application.Name)' with error message: $($_.Exception.Message)"
+      $downloadFailure = Protect-AFNativeDiagnostic -Text $_.Exception.Message
+      Write-AFLogEntry `
+        -Message "[$($configuration.application.Name)] :: Failed to download '$file'. $downloadFailure" `
+        -Level Warning -Tag "Application", ([string]$configuration.application.Name) `
+        -ErrorAction Continue -WarningAction Continue
       continue
     }
   }
-  $script:application_data = Get-Content -Path (Join-Path -Path $download_folder -ChildPath "App.json") | ConvertFrom-Json -Depth 10
+  $script:application_data = Get-Content `
+    -LiteralPath (Join-Path $download_folder "App.json") `
+    -Raw `
+    -Encoding UTF8 |
+    ConvertFrom-Json -Depth 10 -DateKind String
 }

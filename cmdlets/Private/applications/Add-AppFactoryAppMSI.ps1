@@ -62,7 +62,7 @@ function Add-AppFactoryAppMSI{
   }   
   if ($PSBoundParameters.ContainsKey("argumentList") -and $argumentList) {
     $ApplicationScriptLines.Add("`t`$argumentList = `"$($argumentList)`"") | Out-Null
-    $execute = "$($execute) -argumentList `$argumentList"
+    $execute = "$($execute) -AdditionalArgumentList `$argumentList"
   }  
   if ($PSBoundParameters.ContainsKey("secureArgumentList") -and $secureArgumentList) {$execute = "$($execute) -secureArgumentList"}  
   if ($PSBoundParameters.ContainsKey("SkipMSIAlreadyInstalledCheck") -and $SkipMSIAlreadyInstalledCheck) {$execute = "$($execute) -SkipMSIAlreadyInstalledCheck"}  

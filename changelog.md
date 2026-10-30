@@ -1,5 +1,7 @@
-# 0.2.1
+# 0.2.2
 - Fix for long delay between delete and moving on
+
+# 0.2.1
 - Fix to skip already published applications
 
 # 0.2.0

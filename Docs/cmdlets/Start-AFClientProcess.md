@@ -11,7 +11,7 @@ Examples use `$packageConfig = 'C:\AppFactory\Settings\package.json'`, `$clientC
 ## Syntax
 
 ```powershell
-Start-AFClientProcess -configFile <string> -workspace <string> [-application_name <string>] [-EnableLogging] [-LogLevel <string>] [-Force] [-DownloadOnly] [-UseNativeUpload] [-UploadTransport <string>] [-AzCopyPath <string>] [-SkipPreviousVersionCleanup] [-ResumePublishedAppId <string>] [<CommonParameters>]
+Start-AFClientProcess -configFile <string> -workspace <string> [-application_name <string>] [-EnableLogging] [-LogLevel <string>] [-Force] [-RetryFailed] [-DownloadOnly] [-UseNativeUpload] [-UploadTransport <string>] [-AzCopyPath <string>] [-SkipPreviousVersionCleanup] [-ResumePublishedAppId <string>] [<CommonParameters>]
 ```
 
 ## Parameters
@@ -24,6 +24,7 @@ Start-AFClientProcess -configFile <string> -workspace <string> [-application_nam
 | `-EnableLogging` | `switch` | No | False | Enable module log messages and configure its PSFramework file provider. |
 | `-LogLevel` | `string` | No | `"Verbose"` | Default PSFramework level for routine messages. Use Output for normal operator-facing messages, or Verbose together with -Verbose. Does not itself enable logging. |
 | `-Force` | `switch` | No | False | Bypass the usual already-processed version decision. In the client process this can create a duplicate same-version app or replace content; it does not bypass unfinished journals. |
+| `-RetryFailed` | `switch` | No | False | Recover failed journals for current enabled configurations: resume published apps, or retry confirmed-missing create attempts. Preserve original journals and skip previous-version cleanup. Cannot combine with Force, DownloadOnly, or ResumePublishedAppId. |
 | `-DownloadOnly` | `switch` | No | False | Download package assets without the normal Graph publication/assignment/cleanup workflow. Still loads API/SAS settings and writes local files. |
 | `-UseNativeUpload` | `switch` | No | `$true` | Retired-route compatibility switch. Keep true/default; false is rejected. AzCopy is selected separately with UploadTransport. |
 | `-UploadTransport` | `string` | No | `"Auto"` | Byte-transfer selection: Auto, Native, or AzCopy. Auto can choose AzCopy for encrypted payloads >=100MB when available. Accepted: "Auto", "Native", "AzCopy". |
@@ -147,6 +148,25 @@ $captured | Where-Object State -eq 'Failed' |
   Select-Object Application, Stage, Error, JournalPath
 ```
 
+## Example 15: Retry failed applications as a batch
+
+```powershell
+Start-AFClientProcess -configFile $clientConfig -workspace $workspace `
+  -RetryFailed -EnableLogging -LogLevel Output
+```
+
+Add `-application_name '<appfactory-application-uuid>'` to limit recovery to one application. Keep the original workspace and client configuration.
+
+RetryFailed processes only saved `State=Failed` attempts for the current configured version and enabled publication roles. Completed and unattempted configurations return `Skipped` with `Operation=RetryNotRequired`. Older unfinished versions still block processing and must be inspected; the switch does not silently upgrade a failed attempt to a newer version.
+
+A fully published recorded Intune app uses the same validation and completion path as ResumePublishedAppId. A recorded ID that returns an explicit HTTP 404 can be recreated only for an original Create operation while replace_in_place is disabled and no other app represents the same identity/version/role. Absence is checked again after downloading, before any publication request.
+
+Partial uploads, missing/invalid IDs, incompatible resume schemas, ownership or version mismatches, and ambiguous Graph failures remain blocked with per-application errors. Missing replacement or reconciliation targets are never recreated. RetryFailed does not delete failed Intune applications or resume an unfinished byte upload.
+
+Before replacing active status, the original journal is copied and verified under `WorkingFolder/ClientProcessState/Archive/`. The new journal links to it through `RetrySourceJournal`. Backup or download failure leaves the active failed journal intact. The existing workspace lock covers recovery. Each eligible publication is attempted once per invocation; failures do not restart the batch.
+
+Recovery always skips previous-version cleanup. Dependency, assignment, ESP, and configured reverse-dependency processing still run through the existing workflow. Capture pipeline results as shown in Example 14 to retain per-application failures.
+
 ## Behavior and limits
 
 Windows and PowerShell >=7.5 are mandatory, including DownloadOnly. api.client selects the AppFactory client; application_name selects a shared application UUID/slugified name, not an Intune or configuration ID. Omitting it processes all enabled configurations visible for that client. Dependencies can expand the selected work, and updater mode can produce two roles. No TestMode or WhatIf is implemented on this command. Use DownloadOnly for downloads without publication; it is not a full tenant preflight. UseNativeUpload false is rejected.
@@ -169,6 +189,7 @@ Per-configuration objects with Application, Role, Version, State, AppId, and Jou
 | Native blocks only | `-UploadTransport Native` |
 | Retain prior apps for review | `-SkipPreviousVersionCleanup` |
 | Intentional same-version republish | `-Force` |
+| Recover failed client attempts | `-RetryFailed` |
 | Continue after app is already published | `-ResumePublishedAppId`, with one selected configuration |
 
 ### Logging
@@ -212,4 +233,5 @@ Resume requires an already-published exact Intune app ID, exactly one selected c
 [cmdlets/Public/general/Start-AFClientProcess.ps1](https://github.com/jeremyputman/Application.Factory--New-/blob/232b6b3e2a61ec5ece934a6534c402843afa335d/cmdlets/Public/general/Start-AFClientProcess.ps1)
 
 [Logging helper](https://github.com/jeremyputman/Application.Factory--New-/blob/232b6b3e2a61ec5ece934a6534c402843afa335d/cmdlets/Private/misc/Write-AFLogEntry.ps1) · [Transfer selection](https://github.com/jeremyputman/Application.Factory--New-/blob/232b6b3e2a61ec5ece934a6534c402843afa335d/cmdlets/Private/intune/Send-AFNativeIntuneContent.ps1)
+
 

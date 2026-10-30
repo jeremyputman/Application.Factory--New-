@@ -1,3 +1,6 @@
+# 0.2.3
+- Added -RetryFailed flag
+
 # 0.2.2
 - Fix for long delay between delete and moving on
 

@@ -7,6 +7,7 @@ function Start-AFClientProcess {
     [switch]$EnableLogging,
     [string]$LogLevel = "Verbose",
     [switch]$Force,
+    [switch]$RetryFailed,
     [switch]$DownloadOnly,
 
     [switch]$UseNativeUpload = $true,
@@ -39,6 +40,12 @@ function Start-AFClientProcess {
   ) {
     throw "ResumePublishedAppId cannot be combined with Force or DownloadOnly."
   }
+
+  if ($RetryFailed -and ($Force -or $DownloadOnly -or $ResumePublishedAppId)) {
+    throw "RetryFailed cannot be combined with Force, DownloadOnly, or ResumePublishedAppId."
+  }
+  # Recovery never retires previous applications.
+  if ($RetryFailed) { $SkipPreviousVersionCleanup = $true }
 
   $script:log_target = "Application Factory Client"
 
@@ -189,6 +196,9 @@ function Start-AFClientProcess {
       $script:af_native_upload_status = $null
       $script:published_version = $version
 
+      $resumeAppId = $ResumePublishedAppId
+      $retryDecision = $null
+      $retryCheckpointReady = -not $RetryFailed
       $journal = $null
       $journalPath = ""
       $publicationStarted = $false
@@ -282,9 +292,17 @@ function Start-AFClientProcess {
           if ($existingJournal.PSObject.Properties["PublicationRole"]) { $savedRole = [string]$existingJournal.PublicationRole }
           if ($savedRole -ne $role) { throw "Saved journal belongs to a different publication role." }
 
+          if ($RetryFailed -and $existingJournal.State -eq "Failed") {
+            $retryDecision = Get-AFClientRetryDecision -Path $journalPath -Configuration $configuration
+            if ($retryDecision.Action -eq "Resume") { $resumeAppId = [string]$existingJournal.AppId }
+            Write-AFLogEntry -Message "[$appName][$role] :: Retrying failed attempt. Action=$($retryDecision.Action); AppId=$($existingJournal.AppId)." `
+              -Tag "Process", $appName -ErrorAction Continue -WarningAction Continue
+          }
+
           if (
             $existingJournal.State -ne "Complete" -and
-            -not $ResumePublishedAppId
+            -not $resumeAppId -and
+            $retryDecision.Action -ne "Restart"
           ) {
             throw (
               "An unfinished attempt already exists. " +
@@ -339,10 +357,11 @@ function Start-AFClientProcess {
             -Version ([string]$saved.Version)
           if ($stateFile.FullName -ne $expectedPath) { continue }
           if ($saved.State -eq "Complete") { continue }
+          if ($retryDecision.Action -eq "Restart" -and $stateFile.FullName -eq $journalPath) { continue }
           if (
-            $ResumePublishedAppId -and
+            $resumeAppId -and
             $stateFile.FullName -eq $journalPath -and
-            [string]$saved.AppId -eq $ResumePublishedAppId
+            [string]$saved.AppId -eq $resumeAppId
           ) { continue }
 
           throw (
@@ -354,8 +373,21 @@ function Start-AFClientProcess {
           )
         }
 
+        if ($RetryFailed -and $null -eq $retryDecision) {
+          $results.Add([PSCustomObject]@{
+            Application = $appName
+            Role = $role
+            Version = $version
+            State = "Skipped"
+            AppId = ""
+            JournalPath = $journalPath
+            Operation = "RetryNotRequired"
+          })
+          continue
+        }
+
         # Skip completed versions unless explicitly forcing or resuming.
-        if (-not $Force -and -not $ResumePublishedAppId) {
+        if (-not $Force -and -not $resumeAppId) {
           $existingVersionApps = @(
             $matchingApps | Where-Object {
               [string]$_.displayVersion -ceq $version
@@ -405,7 +437,7 @@ function Start-AFClientProcess {
         }
 
 
-        if ($ResumePublishedAppId) {
+        if ($resumeAppId) {
           $inPlaceOperation = (
             $null -ne $existingJournal -and
             $existingJournal.Operation -eq "ReplaceInPlace"
@@ -456,7 +488,7 @@ function Start-AFClientProcess {
           }
         )
 
-        if (-not $ResumePublishedAppId) {
+        if (-not $resumeAppId) {
           $unresolved = @(
             $sameVersion | Where-Object {
               [string]$_.id -notin @($readySameVersion.id)
@@ -485,7 +517,7 @@ function Start-AFClientProcess {
             [int]$_.uploadState -eq 1 -and
             $_.publishingState -eq "published" -and
             $_.committedContentVersion -and
-            [string]$_.id -ne $ResumePublishedAppId -and
+            [string]$_.id -ne $resumeAppId -and
             [string]$_.id -ne $reconcileExistingId
           }
         )
@@ -509,7 +541,7 @@ function Start-AFClientProcess {
             Assert-AFInPlaceDependenciesSafe -App $replacementTarget
           }
         }
-        if ($ResumePublishedAppId) {
+        if ($resumeAppId) {
           if ($existingJournal.DependencySchemaVersion -ne 1) {
             throw "Resume requires a dependency-aware journal. Inspect the existing publication before continuing."
           }
@@ -554,9 +586,9 @@ function Start-AFClientProcess {
         }
 
         if (
-          $ResumePublishedAppId -and
+          $resumeAppId -and
           $existingJournal.AppId -and
-          $existingJournal.AppId -ne $ResumePublishedAppId
+          $existingJournal.AppId -ne $resumeAppId
         ) {
           throw (
             "ResumePublishedAppId differs from the app ID " +
@@ -568,8 +600,8 @@ function Start-AFClientProcess {
           ConfigurationId               = [string]$configuration.id
           DependencySchemaVersion       = 1
           ExpectedDependencies          = @($dependencyBindings)
-          DependencyOperations          = if ($ResumePublishedAppId) { @($existingJournal.DependencyOperations) } else { @() }
-          ReconcileReverseDependencies  = if ($ResumePublishedAppId) { [bool]$existingJournal.ReconcileReverseDependencies } else { [bool]$configuration.reconcile_reverse_dependencies }
+          DependencyOperations          = if ($resumeAppId) { @($existingJournal.DependencyOperations) } else { @() }
+          ReconcileReverseDependencies  = if ($resumeAppId) { [bool]$existingJournal.ReconcileReverseDependencies } else { [bool]$configuration.reconcile_reverse_dependencies }
           CleanupBlocked                = @()
           ApplicationId                 = $appId
           PublicationRole               = $role
@@ -626,17 +658,17 @@ function Start-AFClientProcess {
           $journal.RequirementRulesSchemaVersion = 1
           Save-AFClientProcessJournal -Path $journalPath -Journal $journal
         }
-        elseif ($ResumePublishedAppId) {
+        elseif ($resumeAppId) {
           $stage = "ValidateResumeApplication"
           Write-AFLogEntry `
-            -Message "[$appName][$role] :: Validating published application $ResumePublishedAppId before resuming." `
+            -Message "[$appName][$role] :: Validating published application $resumeAppId before resuming." `
             -Tag "Process", $appName `
             -ErrorAction Continue -WarningAction Continue
 
 
           $published = Assert-AFClientPublishedApp `
             -ApplicationRole $role `
-            -AppId $ResumePublishedAppId `
+            -AppId $resumeAppId `
             -ApplicationId $appId `
             -Version $version `
             -TimeoutSeconds 0
@@ -787,6 +819,16 @@ function Start-AFClientProcess {
           $journal.State = "PublishStarted"
           $journal.Stage = $stage
 
+          if ($retryDecision.Action -eq "Restart") {
+            # Downloads can take time. Recheck absence and inventory just before publishing.
+            $freshDecision = Get-AFClientRetryDecision -Path $journalPath -Configuration $configuration
+            if ($freshDecision.Action -ne "Restart" -or $freshDecision.JournalHash -cne $retryDecision.JournalHash) {
+              throw "The failed attempt changed during recovery. Run RetryFailed again to inspect it."
+            }
+            $journal.RetrySourceJournal = Backup-AFClientRetryJournal -Path $journalPath -ExpectedHash $retryDecision.JournalHash
+            $retryCheckpointReady = $true
+          }
+
           # This must succeed before any creation request is sent.
           Save-AFClientProcessJournal `
             -Path $journalPath `
@@ -865,6 +907,11 @@ function Start-AFClientProcess {
           Save-AFClientProcessJournal `
             -Path $journalPath `
             -Journal $journal
+        }
+
+        if ($retryDecision.Action -eq "Resume") {
+          $journal.RetrySourceJournal = Backup-AFClientRetryJournal -Path $journalPath -ExpectedHash $retryDecision.JournalHash
+          $retryCheckpointReady = $true
         }
 
         $stage = "ConfirmPublished"
@@ -1122,6 +1169,7 @@ function Start-AFClientProcess {
         # an earlier publication journal.
         if (
           $journal -and
+          $retryCheckpointReady -and
           (
             $publicationStarted -or
             -not [string]::IsNullOrWhiteSpace(
@@ -1221,4 +1269,5 @@ function Start-AFClientProcess {
     }
   }
 }
+
 

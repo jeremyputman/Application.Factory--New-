@@ -1,3 +1,7 @@
+# 0.2.1
+- Fix for long delay between delete and moving on
+- Fix to skip already published applications
+
 # 0.2.0
 - Bug fix for leaking variable scope in Copy-AFApplicationClientGroups
 - Working at removing dependency on external Intune powershell module

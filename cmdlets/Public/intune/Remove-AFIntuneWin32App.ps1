@@ -10,7 +10,7 @@ function Remove-AFIntuneWin32App {
   )
 
   $app = Get-AFNativeManagedApp `
-      -ApplicationRole $ApplicationRole `
+    -ApplicationRole $ApplicationRole `
     -Id $Id `
     -ApplicationId $ApplicationId `
     -Version $Version `
@@ -19,8 +19,6 @@ function Remove-AFIntuneWin32App {
   if ($null -eq $app) {
     return
   }
-
-  Assert-AFDependencyCleanupSafe -Id $Id
 
   if (-not $PSCmdlet.ShouldProcess(
       "$($app.displayName) [$Id]",
@@ -32,11 +30,17 @@ function Remove-AFIntuneWin32App {
   $uri = "deviceAppManagement/mobileApps/$Id"
   $writeFailure = ""
 
+  # Keep the final dependency/ESP check immediately before deletion.
+  # Its failures must not be treated as ambiguous DELETE responses.
+  Assert-AFDependencyCleanupSafe -Id $Id
+
   try {
-    Assert-AFDependencyCleanupSafe -Id $Id
     Invoke-AFNativeGraphRequest `
       -Method DELETE `
       -Uri $uri | Out-Null
+
+    # Graph reported success. No confirmation polling is needed.
+    return
   }
   catch {
     $status = [int]$_.Exception.Data["HttpStatus"]
@@ -49,6 +53,8 @@ function Remove-AFIntuneWin32App {
       throw
     }
 
+    # The request may have succeeded despite the error.
+    # Reconcile using the existing GET-until-404 loop below.
     $writeFailure = $_.Exception.Message
   }
 

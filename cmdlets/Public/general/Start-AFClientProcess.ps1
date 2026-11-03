@@ -44,8 +44,8 @@ function Start-AFClientProcess {
   if ($RetryFailed -and ($Force -or $DownloadOnly -or $ResumePublishedAppId)) {
     throw "RetryFailed cannot be combined with Force, DownloadOnly, or ResumePublishedAppId."
   }
-  # Recovery never retires previous applications.
-  if ($RetryFailed) { $SkipPreviousVersionCleanup = $true }
+  # Recovery follows the normal retention policy.
+  # Only an explicit skip or the existing in-place mode rules bypass cleanup.
 
   $script:log_target = "Application Factory Client"
 
@@ -554,10 +554,38 @@ function Start-AFClientProcess {
 
         $plan = $null
         if (-not $reconciliationOnly -and (-not $inPlaceOperation -or $role -eq "updater")) {
-          # Validate expected targets and filters before app creation.
-          $plan = Get-AFClientAssignmentPlan `
-            -Configuration $configuration `
-            -PreviousApps $previousApps
+          if (
+            $resumeAppId -and
+            [int]$existingJournal.AssignmentPlanSchemaVersion -eq 1
+          ) {
+            $plan = $existingJournal.AssignmentPlan
+            if ($null -eq $plan) {
+              throw "The saved assignment plan is missing."
+            }
+          }
+          else {
+            # Legacy attempts that reached cleanup may already have removed
+            # the assignments needed to reconstruct the original plan.
+            if (
+              $resumeAppId -and
+              (
+                $existingJournal.Stage -in @("PreviousVersionCleanup", "Complete") -or
+                @($existingJournal.CleanupBlocked |
+                  Where-Object { $null -ne $_ }).Count -gt 0
+              )
+            ) {
+              throw (
+                "This journal has no saved assignment plan and cleanup may " +
+                "already have changed its source assignments. Inspect the " +
+                "published application's assignments before resuming."
+              )
+            }
+
+            # Validate expected targets and filters before app creation.
+            $plan = Get-AFClientAssignmentPlan `
+              -Configuration $configuration `
+              -PreviousApps $previousApps
+          }
 
           # Validate every selected ESP before app creation.
           foreach ($espName in @(
@@ -627,6 +655,8 @@ function Start-AFClientProcess {
           }
           else { "" }
           AssignmentSnapshot            = @($assignmentSnapshot)
+          AssignmentPlanSchemaVersion   = 1
+          AssignmentPlan                = $plan
           ExpectedDetectionRules        = @()
           ExpectedRequirementRules      = @()
           RequirementRulesSchemaVersion = 0
@@ -1106,6 +1136,16 @@ function Start-AFClientProcess {
           }
         }
 
+        if ($cleanupBlocked.Count -gt 0) {
+          $journal.CleanupBlocked = @($cleanupBlocked.ToArray())
+          throw (
+            "The application is published, but previous-version cleanup " +
+            "is incomplete for $($cleanupBlocked.Count) application(s). " +
+            "Inspect CleanupBlocked in '$journalPath', resolve the blockers, " +
+            "and run RetryFailed again."
+          )
+        }
+
         $stage = "Complete"
         $journal.State = "Complete"
         $journal.Stage = $stage
@@ -1269,5 +1309,6 @@ function Start-AFClientProcess {
     }
   }
 }
+
 
 

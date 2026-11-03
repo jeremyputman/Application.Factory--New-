@@ -4,7 +4,9 @@ function Invoke-AFNativeGraphRequest {
     [Parameter(Mandatory)][ValidateSet("GET", "POST", "PATCH", "DELETE")][string]$Method,
     [Parameter(Mandatory)][string]$Uri,
     [Parameter()]$Body,
-    [ValidateRange(1, 10)][int]$MaxAttempts = 6
+    [ValidateRange(1, 10)][int]$MaxAttempts = 6,
+    [ValidateRange(0, 10)][int]$MaxThrottleRetries = 5,
+    [ValidateRange(1, 3600)][int]$MaxThrottleWaitSeconds = 900    
   )
 
   if ($Uri -notmatch '^https://') {
@@ -21,6 +23,8 @@ function Invoke-AFNativeGraphRequest {
   }
 
   $clientRequestId = [guid]::NewGuid().ToString()
+  $throttleRetries = 0
+  $throttleWaitSeconds = 0.0  
 
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     Connect-AFIntuneGraph
@@ -56,6 +60,42 @@ function Invoke-AFNativeGraphRequest {
     }
     catch {
       $failure = Get-AFNativeHttpFailure -Record $_
+          
+      # Explicit throttling is separate from replaying an uncertain write.
+      if (
+        $failure.Status -eq 429 -and
+        $throttleRetries -lt $MaxThrottleRetries
+      ) {
+        $delay = if ($failure.RetrySeconds -gt 0) {
+          [Math]::Ceiling($failure.RetrySeconds)
+        }
+        else {
+          [Math]::Min(60, [Math]::Pow(2, $throttleRetries + 1)) +
+          (Get-Random -Minimum 0 -Maximum 4)
+        }
+      
+        if (($throttleWaitSeconds + $delay) -le $MaxThrottleWaitSeconds) {
+          $throttleRetries++
+          $throttleWaitSeconds += $delay
+        
+          Write-AFLogEntry `
+            -Message (
+            "Graph HTTP 429; throttling retry " +
+            "$throttleRetries/$MaxThrottleRetries in $($delay)s. " +
+            "Method=$Method; ClientRequestId=$clientRequestId; " +
+            "RequestId=$($failure.RequestId)."
+          ) `
+            -Level Warning -Tag "Graph", "Retry" `
+            -ErrorAction Continue -WarningAction Continue
+        
+          Start-Sleep -Seconds $delay
+        
+          # The for-loop increment restores this attempt number.
+          # A 429 does not consume an ordinary request attempt.
+          $attempt--
+          continue
+        }
+      }      
 
       if ($failure.Status -eq 401 -and $attempt -lt $MaxAttempts) {
         Connect-AFIntuneGraph -Force
@@ -64,12 +104,10 @@ function Invoke-AFNativeGraphRequest {
 
       # GET/PATCH/DELETE are safe to repeat here.
       # POST is repeated only for explicit throttling.
+      # Non-throttling retries retain the existing method restrictions.
       $canRetry = (
-        $failure.Status -eq 429 -or
-        (
-          $Method -ne "POST" -and
-          $failure.Status -in @(0, 408, 500, 502, 503, 504)
-        )
+        $Method -ne "POST" -and
+        $failure.Status -in @(0, 408, 500, 502, 503, 504)
       )
 
       if ($canRetry -and $attempt -lt $MaxAttempts) {
@@ -113,6 +151,9 @@ function Invoke-AFNativeGraphRequest {
       $exception.Data["HttpStatus"] = $failure.Status
       $exception.Data["RequestId"] = $failure.RequestId
       $exception.Data["ClientRequestId"] = $clientRequestId
+      $exception.Data["RetryAfterSeconds"] = $failure.RetrySeconds
+      $exception.Data["ThrottleRetries"] = $throttleRetries
+      $exception.Data["ThrottleWaitSeconds"] = $throttleWaitSeconds      
 
       throw $exception
     }

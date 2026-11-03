@@ -1,3 +1,6 @@
+# 0.2.4
+- Added some additional guards against graph error 429 with retry after
+
 # 0.2.3
 - Added -RetryFailed flag
 
